@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#0a0e14">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>VaultGuard — Zero-Knowledge Cloud File Protection</title>
+    <script>
+      (function(){var p=location.pathname,s=location.search;if(s.indexOf('token=')>=0){if(p.indexOf('verify-email')>=0)document.documentElement.classList.add('early-verify');else if(p.indexOf('reset-password')>=0)document.documentElement.classList.add('early-reset');}}());
+    </script>
+    <style id="early-reset-style">
+        body.show-reset-form #registerForm,.show-reset-form #loginForm,.show-reset-form #loginSwitch,.show-reset-form #forgotForm,.show-reset-form #forgotSwitch,.show-reset-form #verifyEmailPanel{display:none!important}
+        body.show-reset-form #resetForm,.show-reset-form #resetSwitch{display:block!important}
+        body.show-verify-form #registerForm,.show-verify-form #loginForm,.show-verify-form #loginSwitch,.show-verify-form #forgotForm,.show-verify-form #resetForm,.show-verify-form #resetSwitch{display:none!important}
+        body.show-verify-form #verifyEmailPanel{display:block!important}
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Scanline overlay (cyber aesthetic) -->
+    <div class="scanline" aria-hidden="true"></div>
+
+    <!-- LOGIN — Secure Access Terminal -->
+    <div class="login-overlay" id="loginOverlay">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-logo">
+                    <span class="logo-bracket">[</span><span class="logo-accent">VAULT</span>GUARD<span class="logo-bracket">]</span>
+                </div>
+                <p class="login-subtitle">Zero-Knowledge Cloud Protection</p>
+                <div class="login-badge">AES-256-GCM · Key never leaves device</div>
+            </div>
+
+            <!-- Login forms removed -->
+
+            <p class="login-footer-badge">Secure channel · All actions logged</p>
+        </div>
+    </div>
+
+    <!-- HEADER -->
+    <header class="header">
+        <div class="logo">
+            <span class="logo-bracket">[</span><span class="logo-accent">VAULT</span>GUARD<span class="logo-bracket">]</span>
+            <span class="logo-tag">Cloud File Protection</span>
+        </div>
+        <div class="header-right">
+            <!-- User info removed -->
+        </div>
+    </header>
+
+    <!-- MAIN -->
+    <main class="main-container">
+        <div class="dashboard">
+
+            <div class="dashboard-hero">
+                <h1>Cloud File Protection</h1>
+                <p>Upload any file to the cloud — we generate a unique encryption key. Only with that key can the file be decrypted and opened. Zero-knowledge. Military-grade.</p>
+                <div class="hero-badges">
+                    <span class="badge">AES-256-GCM</span>
+                    <span class="badge">PBKDF2 100k</span>
+                    <span class="badge">Zero-knowledge</span>
+                </div>
+            </div>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="protect">Protect file</button>
+                <button class="tab" data-tab="access">Access file</button>
+            </div>
+
+            <!-- PROTECT: Upload → Key → Encrypt & store -->
+            <section class="panel active" id="panel-protect">
+                <div class="panel-card">
+                    <h2 class="panel-title"><span class="panel-num">01</span> Upload file</h2>
+                    <p class="panel-desc">Choose the file you want to protect in the cloud. Any format.</p>
+                    <div class="upload-zone" id="uploadArea">
+                        <div class="upload-icon">
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        </div>
+                        <h4>Drop file or click to upload</h4>
+                        <p>File will be encrypted before it reaches the cloud</p>
+                        <input type="file" id="fileInput" hidden>
+                    </div>
+
+                    <div class="file-info" id="fileInfo">
+                        <div class="file-info-icon">📄</div>
+                        <div class="file-info-text">
+                            <span id="fileName"></span>
+                            <span id="fileSize"></span>
+                        </div>
+                        <button type="button" class="file-remove" id="removeFile" aria-label="Remove file">×</button>
+                    </div>
+
+                    <h2 class="panel-title"><span class="panel-num">02</span> Encryption key</h2>
+                    <p class="panel-desc">We generate a unique key for this file. Save it — without it, the file cannot be decrypted.</p>
+                    <div class="key-block">
+                        <div class="key-row">
+                            <input type="password" id="encryptionKey" placeholder="Paste key (to decrypt) or generate new (to encrypt)" class="key-input">
+                            <button type="button" class="btn-icon" id="keyToggle" title="Show/hide key">👁</button>
+                            <button type="button" class="btn primary small" id="generateKey">Generate key</button>
+                            <button type="button" class="btn secondary small" id="copyKeyBtn" title="Copy key">Copy</button>
+                        </div>
+                        <p class="key-warning">Store this key securely. We do not store it. Loss = permanent lockout.</p>
+                    </div>
+
+                    <h2 class="panel-title"><span class="panel-num">03</span> Encrypt & upload to cloud</h2>
+                    <p class="panel-desc">File is encrypted in your browser, then stored. The cloud only sees ciphertext.</p>
+                    <div class="action-row">
+                        <button class="btn primary large" id="encryptBtn">Encrypt & upload to cloud</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ACCESS: Submit key → Decrypt & open -->
+            <section class="panel" id="panel-access">
+                <div class="panel-card">
+                    <h2 class="panel-title">Your protected files</h2>
+                    <p class="panel-desc">To open a file: submit its encryption key when prompted. File will decrypt and download (or open).</p>
+                    <div class="files-toolbar">
+                        <span class="files-count" id="filesCount">0 files</span>
+                        <button type="button" class="btn ghost small" id="refreshFiles">Refresh</button>
+                    </div>
+                    <ul class="files-list" id="filesList"></ul>
+                    <div class="files-empty" id="filesEmpty">
+                        <div class="empty-icon">🔒</div>
+                        <p>No protected files yet. Use <strong>Protect file</strong> to upload and encrypt.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Status bar -->
+            <div class="status-bar" id="statusArea">
+                <span class="status-dot"></span>
+                <span id="statusMessage">Ready</span>
+            </div>
+
+            <!-- Modal: View encrypted (hex preview) -->
+            <div class="modal-overlay" id="encPreviewOverlay">
+                <div class="modal">
+                    <h3>Encrypted payload (server view)</h3>
+                    <p class="modal-hint">This is how the file is stored — unreadable without the key.</p>
+                    <pre class="modal-pre" id="encPreviewContent"></pre>
+                    <div class="modal-actions">
+                        <button type="button" class="btn ghost" id="encPreviewClose">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal: Enter special key to confirm delete -->
+            <div class="modal-overlay" id="deleteConfirmOverlay">
+                <div class="modal decrypt-modal">
+                    <h3>Confirm deletion</h3>
+                    <p class="modal-hint">Enter this file's <strong>decryption key</strong> (special key) to permanently delete it.</p>
+                    <div class="decrypt-key-row">
+                        <input type="password" id="deleteKeyInput" placeholder="Paste your special key here" class="key-input">
+                        <button type="button" class="btn-icon" id="deleteKeyToggle" title="Show/hide">👁</button>
+                    </div>
+                    <div id="deleteModalError" class="modal-error"></div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn ghost" id="deleteModalCancel">Cancel</button>
+                        <button type="button" class="btn primary danger" id="deleteModalConfirm">Delete file</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal: Enter key to decrypt & open -->
+            <div class="modal-overlay" id="decryptModalOverlay">
+                <div class="modal decrypt-modal">
+                    <h3>Enter decryption key</h3>
+                    <p class="modal-hint">Paste the key you received when you protected this file.</p>
+                    <div class="decrypt-key-row">
+                        <input type="password" id="decryptKeyInput" placeholder="Paste key here" class="key-input">
+                        <button type="button" class="btn-icon" id="decryptKeyToggle" title="Show/hide">👁</button>
+                    </div>
+                    <div id="decryptModalError" class="modal-error"></div>
+                    <label class="checkbox-row">
+                        <input type="checkbox" id="openAfterDownload" checked>
+                        <span>Open file after download (if supported)</span>
+                    </label>
+                    <div class="modal-actions">
+                        <button type="button" class="btn ghost" id="decryptModalCancel">Cancel</button>
+                        <button type="button" class="btn primary" id="decryptModalConfirm">Decrypt & open</button>
+                    </div>
+                </div>
+            </div>
+
+            <footer class="footer">
+                <p>VaultGuard — Zero-knowledge cloud file protection. Keys never leave your device.</p>
+            </footer>
+        </div>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+
+</html>

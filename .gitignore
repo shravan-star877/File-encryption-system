@@ -1,0 +1,10 @@
+node_modules/
+api/.env
+api/reset-links.json
+api/verify-links.json
+api/pending-registrations.json
+api/.tunnel-url
+api/audit.log
+api/uploads/
+api/users.json
+api/files.json
