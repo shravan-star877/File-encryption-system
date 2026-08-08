@@ -402,6 +402,23 @@ app.post('/api/files', authMiddleware, upload.single('file'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const originalName = (req.body && req.body.originalName) || req.file.originalname || 'file';
   const encrypted = (req.body && req.body.encrypted) === 'true';
+
+  const expiryStr = (req.body && req.body.expiry) ? String(req.body.expiry).trim().toLowerCase() : 'never';
+  const now = Date.now();
+  let expiresAt = null;
+  if (expiryStr === '1h') {
+    expiresAt = new Date(now + 1 * 60 * 60 * 1000).toISOString();
+  } else if (expiryStr === '24h') {
+    expiresAt = new Date(now + 24 * 60 * 60 * 1000).toISOString();
+  } else if (expiryStr === '7d') {
+    expiresAt = new Date(now + 7 * 24 * 60 * 60 * 1000).toISOString();
+  } else if (/^-?\d+$/.test(expiryStr)) {
+    const ms = parseInt(expiryStr, 10);
+    if (!isNaN(ms)) {
+      expiresAt = new Date(ms > 1e11 ? ms : now + ms).toISOString();
+    }
+  }
+
   const files = getFiles();
   const entry = {
     id: req.file.filename,
@@ -412,10 +429,11 @@ app.post('/api/files', authMiddleware, upload.single('file'), (req, res) => {
     size: req.file.size,
     encrypted: !!encrypted,
     uploadedAt: new Date().toISOString(),
+    expiresAt: expiresAt,
   };
   files.push(entry);
   saveFiles(files);
-  audit('UPLOAD', req.user.email, `file: ${entry.originalName} id: ${entry.id}`);
+  audit('UPLOAD', req.user.email, `file: ${entry.originalName} id: ${entry.id} expiresAt: ${expiresAt || 'never'}`);
   res.status(201).json(entry);
 });
 
@@ -431,6 +449,15 @@ app.get('/api/files/:id', authMiddleware, (req, res) => {
   const files = getFiles();
   const entry = files.find((f) => f.id === req.params.id && (f.email || f.username) === req.user.email);
   if (!entry) return res.status(404).json({ error: 'File not found' });
+
+  if (entry.expiresAt) {
+    const expMs = new Date(entry.expiresAt).getTime();
+    if (!isNaN(expMs) && expMs <= Date.now()) {
+      audit('DOWNLOAD_BLOCKED_EXPIRED', req.user.email, `file: ${entry.originalName} id: ${entry.id}`);
+      return res.status(410).json({ error: 'This file has expired.' });
+    }
+  }
+
   const filePath = path.join(UPLOAD_DIR, entry.storedName);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
   audit('DOWNLOAD', req.user.email, `file: ${entry.originalName} id: ${entry.id}`);

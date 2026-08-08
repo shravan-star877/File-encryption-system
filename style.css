@@ -691,6 +691,41 @@ body {
     font-family: var(--font-mono);
 }
 
+.file-expired-tag {
+    font-size: 0.65rem;
+    color: var(--danger);
+    margin-left: 0.4rem;
+    font-family: var(--font-mono);
+    border: 1px solid rgba(244, 63, 94, 0.3);
+    padding: 0.1rem 0.35rem;
+    border-radius: var(--radius-sm);
+    background: rgba(244, 63, 94, 0.1);
+}
+
+.expiry-block {
+    margin-bottom: 1.5rem;
+}
+
+.expiry-select {
+    width: 100%;
+    max-width: 320px;
+    padding: 0.65rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 0.85rem;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.expiry-select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+}
+
 .file-actions {
     display: flex;
     gap: 0.4rem;

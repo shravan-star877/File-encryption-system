@@ -150,17 +150,20 @@ async function loadMyFiles() {
                 const li = document.createElement("li");
                 const sizeStr = formatFileSize(f.size);
                 const isEnc = !!f.encrypted;
+                const isExpired = !!(f.expiresAt && !isNaN(new Date(f.expiresAt).getTime()) && new Date(f.expiresAt).getTime() <= Date.now());
                 const encTag = isEnc ? ' <span class="file-enc-tag">encrypted</span>' : '';
+                const expTag = isExpired ? ' <span class="file-expired-tag">expired</span>' : '';
                 const encId = escapeHtml(String(f.id));
                 const encName = escapeHtml(String(f.originalName || 'file'));
+                const expiryMeta = f.expiresAt ? ` · Expires: ${new Date(f.expiresAt).toLocaleString()}` : '';
                 li.innerHTML = `
                     <div class="file-main">
-                        <div class="file-name" title="${encName}">${encName}${encTag}</div>
-                        <div class="file-meta">${sizeStr} · ${new Date(f.uploadedAt).toLocaleDateString()}</div>
+                        <div class="file-name" title="${encName}">${encName}${encTag}${expTag}</div>
+                        <div class="file-meta">${sizeStr} · Uploaded: ${new Date(f.uploadedAt).toLocaleDateString()}${expiryMeta}</div>
                     </div>
                     <div class="file-actions">
-                        ${isEnc ? `<button type="button" class="btn btn-view-enc" data-id="${encId}" data-name="${encName}" title="View encrypted payload">View encrypted</button>` : ''}
-                        <button type="button" class="btn btn-download" data-id="${encId}" data-name="${encName}" data-encrypted="${isEnc ? '1' : '0'}">${isEnc ? 'Decrypt & open' : 'Download'}</button>
+                        ${isEnc && !isExpired ? `<button type="button" class="btn btn-view-enc" data-id="${encId}" data-name="${encName}" title="View encrypted payload">View encrypted</button>` : ''}
+                        <button type="button" class="btn ${isExpired ? 'btn-expired' : 'btn-download'}" data-id="${encId}" data-name="${encName}" data-encrypted="${isEnc ? '1' : '0'}" data-expired="${isExpired ? '1' : '0'}" ${isExpired ? 'disabled' : ''}>${isExpired ? 'Expired' : (isEnc ? 'Decrypt & open' : 'Download')}</button>
                         <button type="button" class="btn btn-delete" data-id="${encId}" data-encrypted="${isEnc ? '1' : '0'}">Delete</button>
                     </div>
                 `;
@@ -195,6 +198,11 @@ let _encPreviewFileName = null;
 async function viewEncryptedFile(id, name) {
     try {
         const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(id)}`, { headers: authHeaders() });
+        if (res.status === 410) {
+            showStatus("This file has expired.");
+            loadMyFiles();
+            return;
+        }
         if (!res.ok) throw new Error("Failed to load");
         const blob = await res.blob();
         const buf = await blob.arrayBuffer();
@@ -271,6 +279,12 @@ document.getElementById("decryptModalConfirm").addEventListener("click", async (
     confirmBtn.textContent = "Decrypting…";
     try {
         const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(_decryptFileId)}`, { headers: authHeaders() });
+        if (res.status === 410) {
+            errEl.textContent = "This file has expired.";
+            showStatus("This file has expired.");
+            loadMyFiles();
+            return;
+        }
         if (!res.ok) throw new Error("Download failed");
         const blob = await res.blob();
         const buf = await blob.arrayBuffer();
@@ -328,6 +342,11 @@ async function downloadFile(id, name, isEncrypted) {
     }
     try {
         const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(id)}`, { headers: authHeaders() });
+        if (res.status === 410) {
+            showStatus("This file has expired.");
+            loadMyFiles();
+            return;
+        }
         if (!res.ok) throw new Error("Download failed");
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
@@ -501,6 +520,8 @@ document.getElementById("encryptBtn").onclick = async () => {
     btn.textContent = "Encrypting…";
     showStatus("Encrypting in browser…");
     try {
+        const expiryEl = document.getElementById("fileExpiry");
+        const expiryVal = expiryEl ? expiryEl.value : "never";
         const buf = await file.arrayBuffer();
         const encryptedBuf = await encryptFile(buf);
         const blob = new Blob([encryptedBuf]);
@@ -508,6 +529,7 @@ document.getElementById("encryptBtn").onclick = async () => {
         form.append("file", blob, file.name);
         form.append("originalName", file.name);
         form.append("encrypted", "true");
+        form.append("expiry", expiryVal);
         showStatus("Uploading…");
         const res = await fetch(`${API_BASE || ""}/api/files`, {
             method: "POST",
@@ -525,6 +547,7 @@ document.getElementById("encryptBtn").onclick = async () => {
         fileInput.value = "";
         fileInfo.style.display = "none";
         encryptionKey.value = "";
+        if (expiryEl) expiryEl.value = "never";
         await loadMyFiles();
     } catch (e) {
         showStatus("Upload failed: " + (e.message || "Check your connection. On mobile, use the tunnel URL."));

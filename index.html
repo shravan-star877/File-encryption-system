@@ -109,7 +109,18 @@
                         <p class="key-warning">Store this key securely. We do not store it. Loss = permanent lockout.</p>
                     </div>
 
-                    <h2 class="panel-title"><span class="panel-num">03</span> Encrypt & upload to cloud</h2>
+                    <h2 class="panel-title"><span class="panel-num">03</span> File expiry (optional)</h2>
+                    <p class="panel-desc">Choose when this file should automatically expire. Expired files are permanently blocked from access.</p>
+                    <div class="expiry-block">
+                        <select id="fileExpiry" class="expiry-select">
+                            <option value="never" selected>Never (No expiry)</option>
+                            <option value="1h">1 Hour</option>
+                            <option value="24h">24 Hours</option>
+                            <option value="7d">7 Days</option>
+                        </select>
+                    </div>
+
+                    <h2 class="panel-title"><span class="panel-num">04</span> Encrypt & upload to cloud</h2>
                     <p class="panel-desc">File is encrypted in your browser, then stored. The cloud only sees ciphertext.</p>
                     <div class="action-row">
                         <button class="btn primary large" id="encryptBtn">Encrypt & upload to cloud</button>
