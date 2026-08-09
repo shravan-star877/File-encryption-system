@@ -447,7 +447,8 @@ app.get('/api/files', authMiddleware, (req, res) => {
 // GET /api/files/:id — download
 app.get('/api/files/:id', authMiddleware, (req, res) => {
   const files = getFiles();
-  const entry = files.find((f) => f.id === req.params.id && (f.email || f.username) === req.user.email);
+  const isShareDownload = req.query && req.query.isShareDownload === 'true';
+  const entry = files.find((f) => f.id === req.params.id && (isShareDownload || (f.email || f.username) === req.user.email));
   if (!entry) return res.status(404).json({ error: 'File not found' });
 
   if (entry.expiresAt) {
@@ -460,7 +461,8 @@ app.get('/api/files/:id', authMiddleware, (req, res) => {
 
   const filePath = path.join(UPLOAD_DIR, entry.storedName);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
-  audit('DOWNLOAD', req.user.email, `file: ${entry.originalName} id: ${entry.id}`);
+  const auditAction = isShareDownload ? 'SHARE_DOWNLOAD' : 'DOWNLOAD';
+  audit(auditAction, req.user.email, `file: ${entry.originalName} id: ${entry.id}`);
   res.download(filePath, entry.originalName);
 });
 

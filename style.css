@@ -742,6 +742,51 @@ body {
     color: var(--bg-deep);
 }
 
+.file-actions .btn-share {
+    background: var(--bg-card);
+    color: var(--cyan);
+    border: 1px solid var(--cyan-dim);
+}
+
+.file-actions .btn-share:hover {
+    background: rgba(34, 211, 238, 0.1);
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.2);
+}
+
+.share-url-input {
+    user-select: all;
+    color: var(--accent);
+    font-weight: 500;
+}
+
+.shared-file-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-top: 1rem;
+}
+
+.shared-file-icon {
+    font-size: 2rem;
+}
+
+.shared-file-info h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text);
+    word-break: break-all;
+}
+
+.shared-file-info p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
 .file-actions .btn-view-enc {
     background: var(--bg-card);
     color: var(--text-muted);

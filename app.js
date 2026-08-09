@@ -104,13 +104,22 @@ async function decryptFile(encryptedBuffer, passphrase) {
     );
 }
 
-/* Splash screen on load */
+/* Splash screen / Share URL detector on load */
 (async () => {
-    setTimeout(() => {
+    const hasShareHash = String(window.location.hash || "").includes("share=");
+    if (hasShareHash) {
         loginOverlay.style.display = "none";
         loadMyFiles();
-    }, 2000);
+        checkShareUrlOnLoad();
+    } else {
+        setTimeout(() => {
+            loginOverlay.style.display = "none";
+            loadMyFiles();
+        }, 2000);
+    }
 })();
+
+window.addEventListener("hashchange", checkShareUrlOnLoad);
 
 /* ---------- FILE UPLOAD ---------- */
 uploadArea.addEventListener("click", () => fileInput.click());
@@ -163,6 +172,7 @@ async function loadMyFiles() {
                     </div>
                     <div class="file-actions">
                         ${isEnc && !isExpired ? `<button type="button" class="btn btn-view-enc" data-id="${encId}" data-name="${encName}" title="View encrypted payload">View encrypted</button>` : ''}
+                        ${!isExpired ? `<button type="button" class="btn btn-share" data-id="${encId}" data-name="${encName}" data-encrypted="${isEnc ? '1' : '0'}" title="Share zero-knowledge link">Share</button>` : ''}
                         <button type="button" class="btn ${isExpired ? 'btn-expired' : 'btn-download'}" data-id="${encId}" data-name="${encName}" data-encrypted="${isEnc ? '1' : '0'}" data-expired="${isExpired ? '1' : '0'}" ${isExpired ? 'disabled' : ''}>${isExpired ? 'Expired' : (isEnc ? 'Decrypt & open' : 'Download')}</button>
                         <button type="button" class="btn btn-delete" data-id="${encId}" data-encrypted="${isEnc ? '1' : '0'}">Delete</button>
                     </div>
@@ -171,6 +181,7 @@ async function loadMyFiles() {
             });
             filesList.querySelectorAll(".btn-download").forEach((btn) => btn.addEventListener("click", () => downloadFile(btn.dataset.id, btn.dataset.name, btn.dataset.encrypted === '1')));
             filesList.querySelectorAll(".btn-view-enc").forEach((btn) => btn.addEventListener("click", () => viewEncryptedFile(btn.dataset.id, btn.dataset.name)));
+            filesList.querySelectorAll(".btn-share").forEach((btn) => btn.addEventListener("click", () => showShareModal(btn.dataset.id, btn.dataset.name, btn.dataset.encrypted === '1')));
             filesList.querySelectorAll(".btn-delete").forEach((btn) => btn.addEventListener("click", () => deleteFile(btn.dataset.id, btn.dataset.encrypted === '1')));
         }
     } catch (err) {
@@ -226,6 +237,163 @@ document.getElementById("encPreviewOverlay").addEventListener("click", (e) => {
 document.getElementById("encPreviewClose").addEventListener("click", () => {
     document.getElementById("encPreviewOverlay").style.display = "none";
 });
+
+/* ---------- SECURE FILE SHARING (Zero-Knowledge) ---------- */
+function showShareModal(id, name, isEncrypted) {
+    let keyStr = "";
+    if (isEncrypted) {
+        const inputKey = prompt("Enter the encryption key for '" + name + "' to generate zero-knowledge share link:");
+        if (inputKey === null) return;
+        keyStr = normalizeKey(inputKey || "");
+        if (!keyStr) {
+            showStatus("Key required to generate share link.");
+            return;
+        }
+    }
+    const baseUrl = window.location.origin + window.location.pathname;
+    const shareUrl = isEncrypted 
+        ? `${baseUrl}#share=${encodeURIComponent(id)}&key=${encodeURIComponent(keyStr)}`
+        : `${baseUrl}#share=${encodeURIComponent(id)}`;
+    
+    const input = document.getElementById("shareUrlInput");
+    const msg = document.getElementById("shareModalMsg");
+    if (input) input.value = shareUrl;
+    if (msg) msg.style.display = "none";
+    const overlay = document.getElementById("shareModalOverlay");
+    if (overlay) overlay.style.display = "flex";
+}
+
+document.getElementById("copyShareUrlBtn").addEventListener("click", async () => {
+    const input = document.getElementById("shareUrlInput");
+    if (!input || !input.value) return;
+    try {
+        await navigator.clipboard.writeText(input.value);
+    } catch {
+        input.select();
+        document.execCommand("copy");
+    }
+    const msg = document.getElementById("shareModalMsg");
+    if (msg) msg.style.display = "block";
+});
+
+document.getElementById("shareModalCancel").addEventListener("click", () => {
+    document.getElementById("shareModalOverlay").style.display = "none";
+});
+
+document.getElementById("shareModalOverlay").addEventListener("click", (e) => {
+    if (e.target.id === "shareModalOverlay") document.getElementById("shareModalOverlay").style.display = "none";
+});
+
+document.getElementById("sharedFileClose").addEventListener("click", () => {
+    document.getElementById("sharedFileOverlay").style.display = "none";
+});
+
+document.getElementById("sharedFileOverlay").addEventListener("click", (e) => {
+    if (e.target.id === "sharedFileOverlay") document.getElementById("sharedFileOverlay").style.display = "none";
+});
+
+async function checkShareUrlOnLoad() {
+    console.log("[ShareLink] Checking URL hash on page load:", window.location.hash);
+    const hash = String(window.location.hash || "");
+    if (!hash || !hash.includes("share=")) return;
+    
+    // Hide login overlay immediately when a share hash is detected
+    if (loginOverlay) loginOverlay.style.display = "none";
+
+    const params = new URLSearchParams(hash.replace(/^#/, ""));
+    const shareId = params.get("share");
+    const shareKey = normalizeKey(params.get("key") || "");
+    console.log("[ShareLink] Extracted shareId:", shareId, "| shareKey present:", !!shareKey);
+    if (!shareId) return;
+
+    showStatus("Shared file link detected. Fetching payload from server...");
+    try {
+        const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(shareId)}?isShareDownload=true`, { headers: authHeaders() });
+        console.log("[ShareLink] API fetch HTTP status:", res.status);
+        if (res.status === 410) {
+            showStatus("This shared file link has expired.");
+            alert("This shared file link has expired.");
+            return;
+        }
+        if (!res.ok) {
+            if (res.status === 404) throw new Error("Shared file not found or removed.");
+            throw new Error(`Download failed (${res.status})`);
+        }
+
+        // Determine original filename from response header or file ID
+        let filename = "shared_file";
+        const cd = res.headers.get("content-disposition");
+        if (cd && cd.includes("filename=")) {
+            const match = cd.match(/filename="?([^";]+)"?/);
+            if (match && match[1]) filename = match[1];
+        }
+        if (filename === "shared_file" && shareId.includes("-")) {
+            filename = shareId.substring(shareId.indexOf("-") + 1);
+        }
+
+        const blob = await res.blob();
+        const buf = await blob.arrayBuffer();
+        console.log("[ShareLink] Payload downloaded. Size:", blob.size, "bytes");
+
+        let dataBlob;
+        if (shareKey) {
+            showStatus("Decrypting shared file client-side using URL key...");
+            console.log("[ShareLink] Decrypting ciphertext with AES-256-GCM + PBKDF2...");
+            const decrypted = await decryptFile(buf, shareKey);
+            console.log("[ShareLink] Decryption SUCCESS! Decrypted byte length:", decrypted.byteLength);
+            
+            const ext = (filename.split(".").pop() || "").toLowerCase();
+            const mimeByExt = {
+                jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+                webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", ico: "image/x-icon",
+                pdf: "application/pdf", webm: "video/webm", mp4: "video/mp4", ogg: "video/ogg",
+                mp3: "audio/mpeg", wav: "audio/wav", txt: "text/plain", html: "text/html",
+                htm: "text/html", json: "application/json", xml: "application/xml"
+            };
+            const mimeType = mimeByExt[ext] || "application/octet-stream";
+            dataBlob = new Blob([decrypted], { type: mimeType });
+        } else {
+            dataBlob = blob;
+        }
+
+        const objectUrl = URL.createObjectURL(dataBlob);
+        const ext = (filename.split(".").pop() || "").toLowerCase();
+        
+        // Populate Shared File Modal
+        const nameEl = document.getElementById("sharedFileName");
+        const sizeEl = document.getElementById("sharedFileSize");
+        const downloadBtn = document.getElementById("sharedFileDownloadBtn");
+        const overlayEl = document.getElementById("sharedFileOverlay");
+        const previewArea = document.getElementById("sharedFilePreviewArea");
+        const imgPreview = document.getElementById("sharedImagePreview");
+        const iconEl = document.getElementById("sharedFileIcon");
+
+        if (nameEl) nameEl.textContent = filename;
+        if (sizeEl) sizeEl.textContent = formatFileSize(dataBlob.size);
+        if (downloadBtn) {
+            downloadBtn.href = objectUrl;
+            downloadBtn.download = filename;
+        }
+
+        const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(ext);
+        if (isImage && previewArea && imgPreview) {
+            imgPreview.src = objectUrl;
+            previewArea.style.display = "block";
+            if (iconEl) iconEl.textContent = "🖼️";
+        } else {
+            if (previewArea) previewArea.style.display = "none";
+            if (iconEl) iconEl.textContent = "📄";
+        }
+
+        if (overlayEl) overlayEl.style.display = "flex";
+        showStatus(`Shared file '${filename}' decrypted and ready!`);
+
+    } catch (err) {
+        console.error("[ShareLink] Error processing share link:", err);
+        showStatus("Failed to process share link: " + (err.message || "Invalid key or payload."));
+        alert("Share Link Error: " + (err.message || "Invalid key or file data."));
+    }
+}
 
 /* Decrypt modal — shown when user clicks Decrypt & Download on encrypted file */
 let _decryptFileId = null;

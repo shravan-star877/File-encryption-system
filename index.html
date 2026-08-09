@@ -201,6 +201,44 @@
                 </div>
             </div>
 
+            <!-- Modal: Secure File Sharing (Zero-Knowledge) -->
+            <div class="modal-overlay" id="shareModalOverlay">
+                <div class="modal share-modal">
+                    <h3>🔗 Zero-Knowledge Share Link</h3>
+                    <p class="modal-hint">Anyone with this link can decrypt and open the file. The key is in the URL fragment and is <strong>never sent to the server</strong>.</p>
+                    <div class="decrypt-key-row">
+                        <input type="text" id="shareUrlInput" readonly class="key-input share-url-input">
+                        <button type="button" class="btn primary small" id="copyShareUrlBtn">Copy link</button>
+                    </div>
+                    <div id="shareModalMsg" class="modal-hint" style="color: var(--accent); display: none; margin-top: 0.5rem;">Link copied to clipboard!</div>
+                    <div class="modal-actions">
+                        <button type="button" class="btn ghost" id="shareModalCancel">Close</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal: Shared File Received View -->
+            <div class="modal-overlay" id="sharedFileOverlay">
+                <div class="modal shared-file-modal">
+                    <h3>🎁 Shared File Received</h3>
+                    <p class="modal-hint">Decrypted client-side using Zero-Knowledge URL key.</p>
+                    <div class="shared-file-card">
+                        <div class="shared-file-icon" id="sharedFileIcon">📄</div>
+                        <div class="shared-file-info">
+                            <h4 id="sharedFileName">file.name</h4>
+                            <p id="sharedFileSize">0 KB</p>
+                        </div>
+                    </div>
+                    <div id="sharedFilePreviewArea" class="shared-file-preview" style="display: none; margin-top: 1rem; text-align: center;">
+                        <img id="sharedImagePreview" src="" alt="Shared preview" style="max-width: 100%; max-height: 250px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                    </div>
+                    <div class="modal-actions" style="margin-top: 1.5rem;">
+                        <button type="button" class="btn ghost" id="sharedFileClose">Close</button>
+                        <a id="sharedFileDownloadBtn" href="#" download class="btn primary">Download File</a>
+                    </div>
+                </div>
+            </div>
+
             <footer class="footer">
                 <p>VaultGuard — Zero-knowledge cloud file protection. Keys never leave your device.</p>
             </footer>
