@@ -238,8 +238,7 @@ document.getElementById("encPreviewClose").addEventListener("click", () => {
     document.getElementById("encPreviewOverlay").style.display = "none";
 });
 
-/* ---------- SECURE FILE SHARING (Zero-Knowledge) ---------- */
-function showShareModal(id, name, isEncrypted) {
+async function showShareModal(id, name, isEncrypted) {
     let keyStr = "";
     if (isEncrypted) {
         const inputKey = prompt("Enter the encryption key for '" + name + "' to generate zero-knowledge share link:");
@@ -247,6 +246,21 @@ function showShareModal(id, name, isEncrypted) {
         keyStr = normalizeKey(inputKey || "");
         if (!keyStr) {
             showStatus("Key required to generate share link.");
+            alert("Key required to generate share link.");
+            return;
+        }
+
+        // Trial decryption to validate encryption key before generating Share Link
+        showStatus("Validating encryption key...");
+        try {
+            const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(id)}`, { headers: authHeaders() });
+            if (!res.ok) throw new Error("Could not load file for validation");
+            const blob = await res.blob();
+            const buf = await blob.arrayBuffer();
+            await decryptFile(buf, keyStr);
+        } catch (e) {
+            showStatus("Invalid encryption key.");
+            alert("Invalid encryption key. Please enter the correct key for this file.");
             return;
         }
     }
@@ -261,6 +275,7 @@ function showShareModal(id, name, isEncrypted) {
     if (msg) msg.style.display = "none";
     const overlay = document.getElementById("shareModalOverlay");
     if (overlay) overlay.style.display = "flex";
+    showStatus("Zero-Knowledge Share Link generated.");
 }
 
 document.getElementById("copyShareUrlBtn").addEventListener("click", async () => {
@@ -312,7 +327,23 @@ async function checkShareUrlOnLoad() {
         console.log("[ShareLink] API fetch HTTP status:", res.status);
         if (res.status === 410) {
             showStatus("This shared file link has expired.");
-            alert("This shared file link has expired.");
+            const overlayEl = document.getElementById("sharedFileOverlay");
+            const titleEl = document.querySelector("#sharedFileOverlay h3");
+            const hintEl = document.querySelector("#sharedFileOverlay .modal-hint");
+            const nameEl = document.getElementById("sharedFileName");
+            const sizeEl = document.getElementById("sharedFileSize");
+            const downloadBtn = document.getElementById("sharedFileDownloadBtn");
+            const previewArea = document.getElementById("sharedFilePreviewArea");
+            const iconEl = document.getElementById("sharedFileIcon");
+
+            if (titleEl) titleEl.textContent = "⌛ Expired Share Link";
+            if (hintEl) hintEl.textContent = "This shared file link has expired and is no longer accessible.";
+            if (nameEl) nameEl.textContent = "File Expired";
+            if (sizeEl) sizeEl.textContent = "Access Blocked (HTTP 410)";
+            if (iconEl) iconEl.textContent = "⌛";
+            if (previewArea) previewArea.style.display = "none";
+            if (downloadBtn) downloadBtn.style.display = "none";
+            if (overlayEl) overlayEl.style.display = "flex";
             return;
         }
         if (!res.ok) {
@@ -359,7 +390,7 @@ async function checkShareUrlOnLoad() {
         const objectUrl = URL.createObjectURL(dataBlob);
         const ext = (filename.split(".").pop() || "").toLowerCase();
         
-        // Populate Shared File Modal
+        // Populate Shared File Modal (Success State)
         const nameEl = document.getElementById("sharedFileName");
         const sizeEl = document.getElementById("sharedFileSize");
         const downloadBtn = document.getElementById("sharedFileDownloadBtn");
@@ -367,12 +398,17 @@ async function checkShareUrlOnLoad() {
         const previewArea = document.getElementById("sharedFilePreviewArea");
         const imgPreview = document.getElementById("sharedImagePreview");
         const iconEl = document.getElementById("sharedFileIcon");
+        const titleEl = document.querySelector("#sharedFileOverlay h3");
+        const hintEl = document.querySelector("#sharedFileOverlay .modal-hint");
 
+        if (titleEl) titleEl.textContent = "🎁 Shared File Received";
+        if (hintEl) hintEl.textContent = "Decrypted client-side using Zero-Knowledge URL key.";
         if (nameEl) nameEl.textContent = filename;
         if (sizeEl) sizeEl.textContent = formatFileSize(dataBlob.size);
         if (downloadBtn) {
             downloadBtn.href = objectUrl;
             downloadBtn.download = filename;
+            downloadBtn.style.display = "inline-flex";
         }
 
         const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(ext);
@@ -390,8 +426,25 @@ async function checkShareUrlOnLoad() {
 
     } catch (err) {
         console.error("[ShareLink] Error processing share link:", err);
-        showStatus("Failed to process share link: " + (err.message || "Invalid key or payload."));
-        alert("Share Link Error: " + (err.message || "Invalid key or file data."));
+        showStatus("Invalid Share Link: Unable to decrypt file.");
+
+        const overlayEl = document.getElementById("sharedFileOverlay");
+        const titleEl = document.querySelector("#sharedFileOverlay h3");
+        const hintEl = document.querySelector("#sharedFileOverlay .modal-hint");
+        const nameEl = document.getElementById("sharedFileName");
+        const sizeEl = document.getElementById("sharedFileSize");
+        const downloadBtn = document.getElementById("sharedFileDownloadBtn");
+        const previewArea = document.getElementById("sharedFilePreviewArea");
+        const iconEl = document.getElementById("sharedFileIcon");
+
+        if (titleEl) titleEl.textContent = "⚠️ Invalid Share Link";
+        if (hintEl) hintEl.textContent = "Unable to decrypt file. The link may be corrupted or the encryption key has been modified.";
+        if (nameEl) nameEl.textContent = "Decryption Failed";
+        if (sizeEl) sizeEl.textContent = "Invalid or modified key";
+        if (iconEl) iconEl.textContent = "❌";
+        if (previewArea) previewArea.style.display = "none";
+        if (downloadBtn) downloadBtn.style.display = "none";
+        if (overlayEl) overlayEl.style.display = "flex";
     }
 }
 
