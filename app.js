@@ -37,14 +37,28 @@ function setToken(token) {
 }
 
 function showLoggedIn(email) {
-    loginOverlay.style.display = "none";
-    userDisplay.textContent = email;
-    userAvatar.textContent = (email[0] || "?").toUpperCase();
+    if (loginOverlay) loginOverlay.style.display = "none";
+    const userInfo = document.getElementById("userInfo");
+    if (userInfo) userInfo.style.display = "flex";
+    if (userDisplay) userDisplay.textContent = email;
+    if (userAvatar) userAvatar.textContent = (email[0] || "?").toUpperCase();
     loadMyFiles();
 }
 
+function logout() {
+    setToken(null);
+    const userInfo = document.getElementById("userInfo");
+    if (userInfo) userInfo.style.display = "none";
+    if (userDisplay) userDisplay.textContent = "";
+    if (userAvatar) userAvatar.textContent = "?";
+    const filesList = document.getElementById("filesList");
+    if (filesList) filesList.innerHTML = `<li class="files-empty"><div class="empty-icon">📂</div><div>Log in to view your files</div></li>`;
+    if (loginOverlay) loginOverlay.style.display = "flex";
+}
+
 function authHeaders() {
-    return {};
+    const token = getToken();
+    return token ? { "Authorization": `Bearer ${token}` } : {};
 }
 
 /* ---------- CRYPTO (AES-256-GCM, key from passphrase) ---------- */
@@ -104,39 +118,28 @@ async function decryptFile(encryptedBuffer, passphrase) {
     );
 }
 
-/* Splash screen / Share URL detector on load */
-(async () => {
-    const hasShareHash = String(window.location.hash || "").includes("share=");
-    if (hasShareHash) {
-        loginOverlay.style.display = "none";
-        loadMyFiles();
-        checkShareUrlOnLoad();
-    } else {
-        setTimeout(() => {
-            loginOverlay.style.display = "none";
-            loadMyFiles();
-        }, 2000);
-    }
-})();
-
 window.addEventListener("hashchange", checkShareUrlOnLoad);
 
 /* ---------- FILE UPLOAD ---------- */
-uploadArea.addEventListener("click", () => fileInput.click());
+if (uploadArea) uploadArea.addEventListener("click", () => fileInput && fileInput.click());
 
-fileInput.addEventListener("change", () => {
-    const file = fileInput.files[0];
-    if (!file) return;
+if (fileInput) {
+    fileInput.addEventListener("change", () => {
+        const file = fileInput.files[0];
+        if (!file) return;
 
-    fileInfo.style.display = "flex";
-    fileName.textContent = file.name;
-    fileSize.textContent = formatFileSize(file.size);
-});
+        if (fileInfo) fileInfo.style.display = "flex";
+        if (fileName) fileName.textContent = file.name;
+        if (fileSize) fileSize.textContent = formatFileSize(file.size);
+    });
+}
 
-removeFile.addEventListener("click", () => {
-    fileInput.value = "";
-    fileInfo.style.display = "none";
-});
+if (removeFile) {
+    removeFile.addEventListener("click", () => {
+        if (fileInput) fileInput.value = "";
+        if (fileInfo) fileInfo.style.display = "none";
+    });
+}
 
 /* ---------- MY FILES (cloud) ---------- */
 const filesList = document.getElementById("filesList");
@@ -231,43 +234,26 @@ async function viewEncryptedFile(id, name) {
     }
 }
 
-document.getElementById("encPreviewOverlay").addEventListener("click", (e) => {
-    if (e.target.id === "encPreviewOverlay") document.getElementById("encPreviewOverlay").style.display = "none";
-});
-document.getElementById("encPreviewClose").addEventListener("click", () => {
-    document.getElementById("encPreviewOverlay").style.display = "none";
-});
+const encPreviewOverlayEl = document.getElementById("encPreviewOverlay");
+if (encPreviewOverlayEl) {
+    encPreviewOverlayEl.addEventListener("click", (e) => {
+        if (e.target.id === "encPreviewOverlay") encPreviewOverlayEl.style.display = "none";
+    });
+}
+const encPreviewCloseEl = document.getElementById("encPreviewClose");
+if (encPreviewCloseEl) {
+    encPreviewCloseEl.addEventListener("click", () => {
+        if (encPreviewOverlayEl) encPreviewOverlayEl.style.display = "none";
+    });
+}
+
+let _sharedPayloadBuf = null;
+let _sharedFilename = null;
+let _sharedObjectUrl = null;
 
 async function showShareModal(id, name, isEncrypted) {
-    let keyStr = "";
-    if (isEncrypted) {
-        const inputKey = prompt("Enter the encryption key for '" + name + "' to generate zero-knowledge share link:");
-        if (inputKey === null) return;
-        keyStr = normalizeKey(inputKey || "");
-        if (!keyStr) {
-            showStatus("Key required to generate share link.");
-            alert("Key required to generate share link.");
-            return;
-        }
-
-        // Trial decryption to validate encryption key before generating Share Link
-        showStatus("Validating encryption key...");
-        try {
-            const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(id)}`, { headers: authHeaders() });
-            if (!res.ok) throw new Error("Could not load file for validation");
-            const blob = await res.blob();
-            const buf = await blob.arrayBuffer();
-            await decryptFile(buf, keyStr);
-        } catch (e) {
-            showStatus("Invalid encryption key.");
-            alert("Invalid encryption key. Please enter the correct key for this file.");
-            return;
-        }
-    }
     const baseUrl = window.location.origin + window.location.pathname;
-    const shareUrl = isEncrypted 
-        ? `${baseUrl}#share=${encodeURIComponent(id)}&key=${encodeURIComponent(keyStr)}`
-        : `${baseUrl}#share=${encodeURIComponent(id)}`;
+    const shareUrl = `${baseUrl}#share=${encodeURIComponent(id)}`;
     
     const input = document.getElementById("shareUrlInput");
     const msg = document.getElementById("shareModalMsg");
@@ -278,80 +264,198 @@ async function showShareModal(id, name, isEncrypted) {
     showStatus("Zero-Knowledge Share Link generated.");
 }
 
-document.getElementById("copyShareUrlBtn").addEventListener("click", async () => {
-    const input = document.getElementById("shareUrlInput");
-    if (!input || !input.value) return;
-    try {
-        await navigator.clipboard.writeText(input.value);
-    } catch {
-        input.select();
-        document.execCommand("copy");
+const copyShareUrlBtnEl = document.getElementById("copyShareUrlBtn");
+if (copyShareUrlBtnEl) {
+    copyShareUrlBtnEl.addEventListener("click", async () => {
+        const input = document.getElementById("shareUrlInput");
+        if (!input || !input.value) return;
+        try {
+            await navigator.clipboard.writeText(input.value);
+        } catch {
+            input.select();
+            document.execCommand("copy");
+        }
+        const msg = document.getElementById("shareModalMsg");
+        if (msg) msg.style.display = "block";
+    });
+}
+
+const shareModalCancelEl = document.getElementById("shareModalCancel");
+if (shareModalCancelEl) {
+    shareModalCancelEl.addEventListener("click", () => {
+        const overlay = document.getElementById("shareModalOverlay");
+        if (overlay) overlay.style.display = "none";
+    });
+}
+
+const shareModalOverlayEl = document.getElementById("shareModalOverlay");
+if (shareModalOverlayEl) {
+    shareModalOverlayEl.addEventListener("click", (e) => {
+        if (e.target.id === "shareModalOverlay") shareModalOverlayEl.style.display = "none";
+    });
+}
+
+function closeShareView() {
+    const overlay = document.getElementById("sharedFileOverlay");
+    if (overlay) overlay.style.display = "none";
+
+    if (_sharedObjectUrl) {
+        URL.revokeObjectURL(_sharedObjectUrl);
+        _sharedObjectUrl = null;
     }
-    const msg = document.getElementById("shareModalMsg");
-    if (msg) msg.style.display = "block";
-});
+    _sharedPayloadBuf = null;
+    _sharedFilename = null;
 
-document.getElementById("shareModalCancel").addEventListener("click", () => {
-    document.getElementById("shareModalOverlay").style.display = "none";
-});
+    const keyInput = document.getElementById("sharedKeyInput");
+    const keyErr = document.getElementById("sharedKeyError");
+    if (keyInput) keyInput.value = "";
+    if (keyErr) keyErr.textContent = "";
 
-document.getElementById("shareModalOverlay").addEventListener("click", (e) => {
-    if (e.target.id === "shareModalOverlay") document.getElementById("shareModalOverlay").style.display = "none";
-});
+    if (window.location.hash) {
+        history.replaceState(null, "", window.location.pathname);
+    }
 
-document.getElementById("sharedFileClose").addEventListener("click", () => {
-    document.getElementById("sharedFileOverlay").style.display = "none";
-});
+    const token = getToken();
+    if (token) {
+        if (loginOverlay) loginOverlay.style.display = "none";
+        loadMyFiles();
+    } else {
+        setToken(null);
+        if (loginOverlay) loginOverlay.style.display = "flex";
+    }
+}
 
-document.getElementById("sharedFileOverlay").addEventListener("click", (e) => {
-    if (e.target.id === "sharedFileOverlay") document.getElementById("sharedFileOverlay").style.display = "none";
-});
+const sharedFileCloseEl = document.getElementById("sharedFileClose");
+if (sharedFileCloseEl) {
+    sharedFileCloseEl.addEventListener("click", closeShareView);
+}
+
+const sharedFileOverlayEl = document.getElementById("sharedFileOverlay");
+if (sharedFileOverlayEl) {
+    sharedFileOverlayEl.addEventListener("click", (e) => {
+        if (e.target.id === "sharedFileOverlay") closeShareView();
+    });
+}
+
+const sharedKeyToggleEl = document.getElementById("sharedKeyToggle");
+if (sharedKeyToggleEl) {
+    sharedKeyToggleEl.addEventListener("click", () => {
+        const input = document.getElementById("sharedKeyInput");
+        if (input) {
+            input.type = input.type === "password" ? "text" : "password";
+        }
+    });
+}
+
+const sharedKeyDecryptBtnEl = document.getElementById("sharedKeyDecryptBtn");
+if (sharedKeyDecryptBtnEl) {
+    sharedKeyDecryptBtnEl.addEventListener("click", async () => {
+        const keyInput = document.getElementById("sharedKeyInput");
+        const keyErr = document.getElementById("sharedKeyError");
+        if (keyErr) keyErr.textContent = "";
+        const keyStr = normalizeKey(keyInput ? keyInput.value || "" : "");
+
+        if (!keyStr) {
+            if (keyErr) keyErr.textContent = "Please enter the decryption key.";
+            return;
+        }
+        if (!_sharedPayloadBuf) {
+            if (keyErr) keyErr.textContent = "Shared payload not available. Please reopen share link.";
+            return;
+        }
+
+        showStatus("Decrypting shared file client-side...");
+        try {
+            const decryptedBuf = await decryptFile(_sharedPayloadBuf, keyStr);
+            const filename = _sharedFilename || "shared_file";
+            const ext = (filename.split(".").pop() || "").toLowerCase();
+            const mimeByExt = {
+                jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+                webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", ico: "image/x-icon",
+                pdf: "application/pdf", webm: "video/webm", mp4: "video/mp4", ogg: "video/ogg",
+                mp3: "audio/mpeg", wav: "audio/wav", txt: "text/plain", html: "text/html",
+                htm: "text/html", json: "application/json", xml: "application/xml"
+            };
+            const mimeType = mimeByExt[ext] || "application/octet-stream";
+            const dataBlob = new Blob([decryptedBuf], { type: mimeType });
+
+            if (_sharedObjectUrl) URL.revokeObjectURL(_sharedObjectUrl);
+            _sharedObjectUrl = URL.createObjectURL(dataBlob);
+
+            const titleEl = document.querySelector("#sharedFileOverlay h3");
+            const hintEl = document.querySelector("#sharedFileOverlay .modal-hint");
+            const nameEl = document.getElementById("sharedFileName");
+            const sizeEl = document.getElementById("sharedFileSize");
+            const iconEl = document.getElementById("sharedFileIcon");
+            const downloadBtn = document.getElementById("sharedFileDownloadBtn");
+            const previewArea = document.getElementById("sharedFilePreviewArea");
+            const imgPreview = document.getElementById("sharedImagePreview");
+            const keySection = document.getElementById("sharedKeySection");
+
+            if (titleEl) titleEl.textContent = "🎁 Shared File Decrypted";
+            if (hintEl) hintEl.textContent = "Decrypted client-side with your key. File preview ready.";
+            if (nameEl) nameEl.textContent = filename;
+            if (sizeEl) sizeEl.textContent = formatFileSize(decryptedBuf.byteLength);
+
+            const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(ext);
+            if (isImage && previewArea && imgPreview) {
+                imgPreview.src = _sharedObjectUrl;
+                previewArea.style.display = "block";
+                if (iconEl) iconEl.textContent = "🖼️";
+            } else {
+                if (previewArea) previewArea.style.display = "none";
+                if (iconEl) iconEl.textContent = "📄";
+            }
+
+            if (keySection) keySection.style.display = "none";
+            if (downloadBtn) {
+                downloadBtn.href = _sharedObjectUrl;
+                downloadBtn.download = filename;
+                downloadBtn.style.display = "inline-flex";
+            }
+
+            showStatus("File decrypted successfully.");
+
+        } catch (err) {
+            console.error("[ShareLink] Decryption failed:", err);
+            if (keyErr) keyErr.textContent = "Invalid Decryption Key";
+            showStatus("Invalid Decryption Key.");
+        }
+    });
+}
 
 async function checkShareUrlOnLoad() {
     console.log("[ShareLink] Checking URL hash on page load:", window.location.hash);
     const hash = String(window.location.hash || "");
     if (!hash || !hash.includes("share=")) return;
     
-    // Hide login overlay immediately when a share hash is detected
     if (loginOverlay) loginOverlay.style.display = "none";
 
     const params = new URLSearchParams(hash.replace(/^#/, ""));
     const shareId = params.get("share");
-    const shareKey = normalizeKey(params.get("key") || "");
-    console.log("[ShareLink] Extracted shareId:", shareId, "| shareKey present:", !!shareKey);
-    if (!shareId) return;
+    console.log("[ShareLink] Extracted shareId:", shareId);
+    if (!shareId) {
+        showStatus("Invalid Share Link.");
+        renderInvalidShareUI("⚠️ Invalid Share Link", "The share link fragment is missing a valid file ID.", "❌");
+        return;
+    }
 
     showStatus("Shared file link detected. Fetching payload from server...");
     try {
-        const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(shareId)}?isShareDownload=true`, { headers: authHeaders() });
+        const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(shareId)}?isShareDownload=true`);
         console.log("[ShareLink] API fetch HTTP status:", res.status);
+
         if (res.status === 410) {
             showStatus("This shared file link has expired.");
-            const overlayEl = document.getElementById("sharedFileOverlay");
-            const titleEl = document.querySelector("#sharedFileOverlay h3");
-            const hintEl = document.querySelector("#sharedFileOverlay .modal-hint");
-            const nameEl = document.getElementById("sharedFileName");
-            const sizeEl = document.getElementById("sharedFileSize");
-            const downloadBtn = document.getElementById("sharedFileDownloadBtn");
-            const previewArea = document.getElementById("sharedFilePreviewArea");
-            const iconEl = document.getElementById("sharedFileIcon");
-
-            if (titleEl) titleEl.textContent = "⌛ Expired Share Link";
-            if (hintEl) hintEl.textContent = "This shared file link has expired and is no longer accessible.";
-            if (nameEl) nameEl.textContent = "File Expired";
-            if (sizeEl) sizeEl.textContent = "Access Blocked (HTTP 410)";
-            if (iconEl) iconEl.textContent = "⌛";
-            if (previewArea) previewArea.style.display = "none";
-            if (downloadBtn) downloadBtn.style.display = "none";
-            if (overlayEl) overlayEl.style.display = "flex";
+            renderInvalidShareUI("⌛ Expired Share Link", "This shared file link has expired and is no longer accessible.", "⌛");
             return;
         }
         if (!res.ok) {
-            if (res.status === 404) throw new Error("Shared file not found or removed.");
-            throw new Error(`Download failed (${res.status})`);
+            showStatus("Invalid Share Link.");
+            renderInvalidShareUI("⚠️ Invalid Share Link", "Unable to locate shared file. The link may be invalid or removed.", "❌");
+            return;
         }
 
-        // Determine original filename from response header or file ID
         let filename = "shared_file";
         const cd = res.headers.get("content-disposition");
         if (cd && cd.includes("filename=")) {
@@ -363,89 +467,62 @@ async function checkShareUrlOnLoad() {
         }
 
         const blob = await res.blob();
-        const buf = await blob.arrayBuffer();
-        console.log("[ShareLink] Payload downloaded. Size:", blob.size, "bytes");
+        _sharedPayloadBuf = await blob.arrayBuffer();
+        _sharedFilename = filename;
 
-        let dataBlob;
-        if (shareKey) {
-            showStatus("Decrypting shared file client-side using URL key...");
-            console.log("[ShareLink] Decrypting ciphertext with AES-256-GCM + PBKDF2...");
-            const decrypted = await decryptFile(buf, shareKey);
-            console.log("[ShareLink] Decryption SUCCESS! Decrypted byte length:", decrypted.byteLength);
-            
-            const ext = (filename.split(".").pop() || "").toLowerCase();
-            const mimeByExt = {
-                jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
-                webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", ico: "image/x-icon",
-                pdf: "application/pdf", webm: "video/webm", mp4: "video/mp4", ogg: "video/ogg",
-                mp3: "audio/mpeg", wav: "audio/wav", txt: "text/plain", html: "text/html",
-                htm: "text/html", json: "application/json", xml: "application/xml"
-            };
-            const mimeType = mimeByExt[ext] || "application/octet-stream";
-            dataBlob = new Blob([decrypted], { type: mimeType });
-        } else {
-            dataBlob = blob;
-        }
-
-        const objectUrl = URL.createObjectURL(dataBlob);
-        const ext = (filename.split(".").pop() || "").toLowerCase();
-        
-        // Populate Shared File Modal (Success State)
-        const nameEl = document.getElementById("sharedFileName");
-        const sizeEl = document.getElementById("sharedFileSize");
-        const downloadBtn = document.getElementById("sharedFileDownloadBtn");
-        const overlayEl = document.getElementById("sharedFileOverlay");
-        const previewArea = document.getElementById("sharedFilePreviewArea");
-        const imgPreview = document.getElementById("sharedImagePreview");
-        const iconEl = document.getElementById("sharedFileIcon");
         const titleEl = document.querySelector("#sharedFileOverlay h3");
         const hintEl = document.querySelector("#sharedFileOverlay .modal-hint");
+        const nameEl = document.getElementById("sharedFileName");
+        const sizeEl = document.getElementById("sharedFileSize");
+        const iconEl = document.getElementById("sharedFileIcon");
+        const downloadBtn = document.getElementById("sharedFileDownloadBtn");
+        const previewArea = document.getElementById("sharedFilePreviewArea");
+        const keySection = document.getElementById("sharedKeySection");
+        const keyInput = document.getElementById("sharedKeyInput");
+        const keyErr = document.getElementById("sharedKeyError");
+        const overlayEl = document.getElementById("sharedFileOverlay");
 
-        if (titleEl) titleEl.textContent = "🎁 Shared File Received";
-        if (hintEl) hintEl.textContent = "Decrypted client-side using Zero-Knowledge URL key.";
+        if (titleEl) titleEl.textContent = "🔒 Shared Encrypted File";
+        if (hintEl) hintEl.textContent = "Enter the decryption key provided by the sender to unlock this file.";
         if (nameEl) nameEl.textContent = filename;
-        if (sizeEl) sizeEl.textContent = formatFileSize(dataBlob.size);
-        if (downloadBtn) {
-            downloadBtn.href = objectUrl;
-            downloadBtn.download = filename;
-            downloadBtn.style.display = "inline-flex";
-        }
-
-        const isImage = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp"].includes(ext);
-        if (isImage && previewArea && imgPreview) {
-            imgPreview.src = objectUrl;
-            previewArea.style.display = "block";
-            if (iconEl) iconEl.textContent = "🖼️";
-        } else {
-            if (previewArea) previewArea.style.display = "none";
-            if (iconEl) iconEl.textContent = "📄";
-        }
+        if (sizeEl) sizeEl.textContent = formatFileSize(blob.size);
+        if (iconEl) iconEl.textContent = "🔒";
+        if (keySection) keySection.style.display = "block";
+        if (keyInput) keyInput.value = "";
+        if (keyErr) keyErr.textContent = "";
+        if (previewArea) previewArea.style.display = "none";
+        if (downloadBtn) downloadBtn.style.display = "none";
 
         if (overlayEl) overlayEl.style.display = "flex";
-        showStatus(`Shared file '${filename}' decrypted and ready!`);
+        if (keyInput) keyInput.focus();
 
     } catch (err) {
         console.error("[ShareLink] Error processing share link:", err);
-        showStatus("Invalid Share Link: Unable to decrypt file.");
-
-        const overlayEl = document.getElementById("sharedFileOverlay");
-        const titleEl = document.querySelector("#sharedFileOverlay h3");
-        const hintEl = document.querySelector("#sharedFileOverlay .modal-hint");
-        const nameEl = document.getElementById("sharedFileName");
-        const sizeEl = document.getElementById("sharedFileSize");
-        const downloadBtn = document.getElementById("sharedFileDownloadBtn");
-        const previewArea = document.getElementById("sharedFilePreviewArea");
-        const iconEl = document.getElementById("sharedFileIcon");
-
-        if (titleEl) titleEl.textContent = "⚠️ Invalid Share Link";
-        if (hintEl) hintEl.textContent = "Unable to decrypt file. The link may be corrupted or the encryption key has been modified.";
-        if (nameEl) nameEl.textContent = "Decryption Failed";
-        if (sizeEl) sizeEl.textContent = "Invalid or modified key";
-        if (iconEl) iconEl.textContent = "❌";
-        if (previewArea) previewArea.style.display = "none";
-        if (downloadBtn) downloadBtn.style.display = "none";
-        if (overlayEl) overlayEl.style.display = "flex";
+        showStatus("Invalid Share Link.");
+        renderInvalidShareUI("⚠️ Invalid Share Link", "Unable to fetch shared file payload. Check network connection.", "❌");
     }
+}
+
+function renderInvalidShareUI(title, hint, icon = "⚠️") {
+    const titleEl = document.querySelector("#sharedFileOverlay h3");
+    const hintEl = document.querySelector("#sharedFileOverlay .modal-hint");
+    const nameEl = document.getElementById("sharedFileName");
+    const sizeEl = document.getElementById("sharedFileSize");
+    const downloadBtn = document.getElementById("sharedFileDownloadBtn");
+    const previewArea = document.getElementById("sharedFilePreviewArea");
+    const iconEl = document.getElementById("sharedFileIcon");
+    const keySection = document.getElementById("sharedKeySection");
+    const overlayEl = document.getElementById("sharedFileOverlay");
+
+    if (titleEl) titleEl.textContent = title;
+    if (hintEl) hintEl.textContent = hint;
+    if (nameEl) nameEl.textContent = "Access Blocked";
+    if (sizeEl) sizeEl.textContent = "";
+    if (iconEl) iconEl.textContent = icon;
+    if (keySection) keySection.style.display = "none";
+    if (previewArea) previewArea.style.display = "none";
+    if (downloadBtn) downloadBtn.style.display = "none";
+    if (overlayEl) overlayEl.style.display = "flex";
 }
 
 /* Decrypt modal — shown when user clicks Decrypt & Download on encrypted file */
@@ -467,24 +544,37 @@ function hideDecryptModal() {
     _decryptFileName = null;
 }
 
-document.getElementById("decryptModalOverlay").addEventListener("click", (e) => {
-    if (e.target.id === "decryptModalOverlay") hideDecryptModal();
-});
-document.getElementById("decryptModalCancel").addEventListener("click", hideDecryptModal);
-document.getElementById("decryptKeyToggle").addEventListener("click", () => {
-    const input = document.getElementById("decryptKeyInput");
-    const btn = document.getElementById("decryptKeyToggle");
-    if (input.type === "password") {
-        input.type = "text";
-        btn.textContent = "🙈";
-        btn.title = "Click to hide key";
-    } else {
-        input.type = "password";
-        btn.textContent = "👁";
-        btn.title = "Click to show key";
-    }
-});
-document.getElementById("decryptModalConfirm").addEventListener("click", async () => {
+const decryptModalOverlayEl = document.getElementById("decryptModalOverlay");
+if (decryptModalOverlayEl) {
+    decryptModalOverlayEl.addEventListener("click", (e) => {
+        if (e.target.id === "decryptModalOverlay") hideDecryptModal();
+    });
+}
+const decryptModalCancelEl = document.getElementById("decryptModalCancel");
+if (decryptModalCancelEl) {
+    decryptModalCancelEl.addEventListener("click", hideDecryptModal);
+}
+const decryptKeyToggleEl = document.getElementById("decryptKeyToggle");
+if (decryptKeyToggleEl) {
+    decryptKeyToggleEl.addEventListener("click", () => {
+        const input = document.getElementById("decryptKeyInput");
+        const btn = document.getElementById("decryptKeyToggle");
+        if (input && btn) {
+            if (input.type === "password") {
+                input.type = "text";
+                btn.textContent = "🙈";
+                btn.title = "Click to hide key";
+            } else {
+                input.type = "password";
+                btn.textContent = "👁";
+                btn.title = "Click to show key";
+            }
+        }
+    });
+}
+const decryptModalConfirmEl = document.getElementById("decryptModalConfirm");
+if (decryptModalConfirmEl) {
+    decryptModalConfirmEl.addEventListener("click", async () => {
     const keyInput = document.getElementById("decryptKeyInput");
     const keyStr = normalizeKey(keyInput.value || "");
     const errEl = document.getElementById("decryptModalError");
@@ -555,6 +645,7 @@ document.getElementById("decryptModalConfirm").addEventListener("click", async (
         confirmBtn.textContent = "Decrypt & open";
     }
 });
+}
 
 async function downloadFile(id, name, isEncrypted) {
     if (isEncrypted) {
@@ -606,24 +697,37 @@ function hideDeleteModal() {
     _deleteFileId = null;
 }
 
-document.getElementById("deleteConfirmOverlay").addEventListener("click", (e) => {
-    if (e.target.id === "deleteConfirmOverlay") hideDeleteModal();
-});
-document.getElementById("deleteModalCancel").addEventListener("click", hideDeleteModal);
-document.getElementById("deleteKeyToggle").addEventListener("click", () => {
-    const input = document.getElementById("deleteKeyInput");
-    const btn = document.getElementById("deleteKeyToggle");
-    if (input.type === "password") {
-        input.type = "text";
-        btn.textContent = "🙈";
-        btn.title = "Click to hide key";
-    } else {
-        input.type = "password";
-        btn.textContent = "👁";
-        btn.title = "Click to show key";
-    }
-});
-document.getElementById("deleteModalConfirm").addEventListener("click", async () => {
+const deleteConfirmOverlayEl = document.getElementById("deleteConfirmOverlay");
+if (deleteConfirmOverlayEl) {
+    deleteConfirmOverlayEl.addEventListener("click", (e) => {
+        if (e.target.id === "deleteConfirmOverlay") hideDeleteModal();
+    });
+}
+const deleteModalCancelEl = document.getElementById("deleteModalCancel");
+if (deleteModalCancelEl) {
+    deleteModalCancelEl.addEventListener("click", hideDeleteModal);
+}
+const deleteKeyToggleEl = document.getElementById("deleteKeyToggle");
+if (deleteKeyToggleEl) {
+    deleteKeyToggleEl.addEventListener("click", () => {
+        const input = document.getElementById("deleteKeyInput");
+        const btn = document.getElementById("deleteKeyToggle");
+        if (input && btn) {
+            if (input.type === "password") {
+                input.type = "text";
+                btn.textContent = "🙈";
+                btn.title = "Click to hide key";
+            } else {
+                input.type = "password";
+                btn.textContent = "👁";
+                btn.title = "Click to show key";
+            }
+        }
+    });
+}
+const deleteModalConfirmEl = document.getElementById("deleteModalConfirm");
+if (deleteModalConfirmEl) {
+    deleteModalConfirmEl.addEventListener("click", async () => {
     const keyInput = document.getElementById("deleteKeyInput");
     const keyStr = normalizeKey(keyInput.value || "");
     const errEl = document.getElementById("deleteModalError");
@@ -660,6 +764,7 @@ document.getElementById("deleteModalConfirm").addEventListener("click", async ()
         errEl.textContent = errEl.textContent || "Delete failed.";
     }
 });
+}
 
 async function deleteFile(id, isEncrypted) {
     if (isEncrypted) {
@@ -677,7 +782,7 @@ async function deleteFile(id, isEncrypted) {
     }
 }
 
-refreshFilesBtn.addEventListener("click", () => loadMyFiles());
+if (refreshFilesBtn) refreshFilesBtn.addEventListener("click", () => loadMyFiles());
 
 /* ---------- Tabs (Protect / Access) ---------- */
 document.querySelectorAll(".tab").forEach((tab) => {
@@ -693,38 +798,50 @@ document.querySelectorAll(".tab").forEach((tab) => {
 });
 
 /* ---------- KEY ---------- */
-generateKey.addEventListener("click", () => {
-    if (!fileInput.files[0]) {
-        showStatus("Select a file first, then generate the key.");
-        return;
-    }
-    encryptionKey.value = crypto.randomUUID().replace(/-/g, "");
-    showStatus("Key generated. Copy and store it securely — required to decrypt this file.");
-});
+if (generateKey) {
+    generateKey.addEventListener("click", () => {
+        if (!fileInput || !fileInput.files[0]) {
+            showStatus("Select a file first, then generate the key.");
+            return;
+        }
+        if (encryptionKey) encryptionKey.value = crypto.randomUUID().replace(/-/g, "");
+        showStatus("Key generated. Copy and store it securely — required to decrypt this file.");
+    });
+}
 
-document.getElementById("copyKeyBtn").addEventListener("click", async () => {
-    const key = normalizeKey(encryptionKey.value || "");
-    if (!key) {
-        showStatus("Generate or paste a key first.");
-        return;
-    }
-    try {
-        await navigator.clipboard.writeText(key);
-        showStatus("Key copied to clipboard.");
-    } catch {
-        encryptionKey.select();
-        document.execCommand("copy");
-        showStatus("Key selected — press Ctrl+C to copy.");
-    }
-});
+const copyKeyBtnEl = document.getElementById("copyKeyBtn");
+if (copyKeyBtnEl) {
+    copyKeyBtnEl.addEventListener("click", async () => {
+        const key = normalizeKey(encryptionKey ? encryptionKey.value || "" : "");
+        if (!key) {
+            showStatus("Generate or paste a key first.");
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(key);
+            showStatus("Key copied to clipboard.");
+        } catch {
+            if (encryptionKey) {
+                encryptionKey.select();
+                document.execCommand("copy");
+            }
+            showStatus("Key selected — press Ctrl+C to copy.");
+        }
+    });
+}
 
-keyToggle.addEventListener("click", () => {
-    encryptionKey.type =
-        encryptionKey.type === "password" ? "text" : "password";
-});
+if (keyToggle) {
+    keyToggle.addEventListener("click", () => {
+        if (encryptionKey) {
+            encryptionKey.type = encryptionKey.type === "password" ? "text" : "password";
+        }
+    });
+}
 
 /* ---------- ACTION BUTTONS ---------- */
-document.getElementById("encryptBtn").onclick = async () => {
+const encryptBtnEl = document.getElementById("encryptBtn");
+if (encryptBtnEl) {
+    encryptBtnEl.onclick = async () => {
     const file = fileInput.files[0];
     if (!file) {
         showStatus("Select a file first.");
@@ -775,9 +892,205 @@ document.getElementById("encryptBtn").onclick = async () => {
     }
     btn.disabled = false;
     btn.textContent = origText;
-};
+    };
+}
 
 function showStatus(msg) {
     if (statusArea) statusArea.style.display = "flex";
     if (statusMessage) statusMessage.textContent = msg;
 }
+
+/* ---------- AUTH UI LISTENERS & SESSION PERSISTENCE ---------- */
+
+const loginFormEl = document.getElementById("loginForm");
+if (loginFormEl) {
+    loginFormEl.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = (document.getElementById("loginEmail").value || "").trim();
+        const password = document.getElementById("loginPassword").value || "";
+        const errorEl = document.getElementById("loginError");
+        if (errorEl) errorEl.textContent = "";
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            if (errorEl) errorEl.textContent = "Please enter a valid email address.";
+            return;
+        }
+
+        try {
+            const res = await fetch(`${API_BASE}/api/login`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, password }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                if (errorEl) errorEl.textContent = data.error || "Invalid email or password";
+                return;
+            }
+            setToken(data.token);
+            showLoggedIn(data.email);
+        } catch (err) {
+            if (errorEl) errorEl.textContent = "Login failed. Please check network connection.";
+        }
+    });
+}
+
+const registerFormEl = document.getElementById("registerForm");
+if (registerFormEl) {
+    registerFormEl.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const email = (document.getElementById("regEmail").value || "").trim();
+        const password = document.getElementById("regPassword").value || "";
+        const confirmPassword = document.getElementById("regConfirmPassword").value || "";
+        const errorEl = document.getElementById("regError");
+        const successEl = document.getElementById("regSuccess");
+
+        if (errorEl) errorEl.textContent = "";
+        if (successEl) { successEl.textContent = ""; successEl.style.display = "none"; }
+
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            if (errorEl) errorEl.textContent = "Please enter a valid email address.";
+            return;
+        }
+        if (password.length < 6) {
+            if (errorEl) errorEl.textContent = "Password must be at least 6 characters long.";
+            return;
+        }
+        if (password !== confirmPassword) {
+            if (errorEl) errorEl.textContent = "Confirm Password does not match Password.";
+            return;
+        }
+
+        try {
+            const res = await fetch(`${API_BASE}/api/register`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ email, password }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                if (errorEl) errorEl.textContent = data.error || "Registration failed";
+                return;
+            }
+            if (successEl) {
+                successEl.textContent = "Account created successfully! Switching to login...";
+                successEl.style.display = "block";
+            }
+            setTimeout(() => {
+                if (registerFormEl) registerFormEl.style.display = "none";
+                if (loginFormEl) loginFormEl.style.display = "block";
+                document.getElementById("loginEmail").value = email;
+                document.getElementById("loginPassword").focus();
+            }, 1200);
+        } catch (err) {
+            if (errorEl) errorEl.textContent = "Registration failed. Please check network connection.";
+        }
+    });
+}
+
+const showRegisterBtn = document.getElementById("showRegisterBtn");
+if (showRegisterBtn) {
+    showRegisterBtn.addEventListener("click", () => {
+        if (loginFormEl) loginFormEl.style.display = "none";
+        if (registerFormEl) registerFormEl.style.display = "block";
+        const regErr = document.getElementById("regError");
+        if (regErr) regErr.textContent = "";
+    });
+}
+
+const showLoginBtn = document.getElementById("showLoginBtn");
+if (showLoginBtn) {
+    showLoginBtn.addEventListener("click", () => {
+        if (registerFormEl) registerFormEl.style.display = "none";
+        if (loginFormEl) loginFormEl.style.display = "block";
+        const loginErr = document.getElementById("loginError");
+        if (loginErr) loginErr.textContent = "";
+    });
+}
+
+/* ---------- LOGOUT CONFIRMATION MODAL (UI/UX ONLY) ---------- */
+const logoutModalOverlayEl = document.getElementById("logoutModalOverlay");
+const logoutModalCancelEl = document.getElementById("logoutModalCancel");
+const logoutModalConfirmEl = document.getElementById("logoutModalConfirm");
+
+if (logoutBtn) {
+    logoutBtn.addEventListener("click", () => {
+        if (logoutModalOverlayEl) logoutModalOverlayEl.style.display = "flex";
+    });
+}
+
+if (logoutModalCancelEl) {
+    logoutModalCancelEl.addEventListener("click", () => {
+        if (logoutModalOverlayEl) logoutModalOverlayEl.style.display = "none";
+    });
+}
+
+if (logoutModalConfirmEl) {
+    logoutModalConfirmEl.addEventListener("click", () => {
+        if (logoutModalOverlayEl) logoutModalOverlayEl.style.display = "none";
+        logout();
+    });
+}
+
+if (logoutModalOverlayEl) {
+    logoutModalOverlayEl.addEventListener("click", (e) => {
+        if (e.target.id === "logoutModalOverlay") {
+            logoutModalOverlayEl.style.display = "none";
+        }
+    });
+}
+
+window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+        if (logoutModalOverlayEl && logoutModalOverlayEl.style.display === "flex") {
+            logoutModalOverlayEl.style.display = "none";
+        }
+    }
+});
+
+/* ---------- PASSWORD SHOW/HIDE TOGGLE (UI ONLY) ---------- */
+function setupPasswordToggle(inputId, toggleBtnId) {
+    const input = document.getElementById(inputId);
+    const btn = document.getElementById(toggleBtnId);
+    if (input && btn) {
+        btn.addEventListener("click", (e) => {
+            e.preventDefault();
+            const isPassword = input.type === "password";
+            input.type = isPassword ? "text" : "password";
+            btn.textContent = isPassword ? "🙈" : "👁️";
+            btn.setAttribute("title", isPassword ? "Hide password" : "Show password");
+        });
+    }
+}
+
+setupPasswordToggle("loginPassword", "loginPasswordToggle");
+setupPasswordToggle("regPassword", "regPasswordToggle");
+setupPasswordToggle("regConfirmPassword", "regConfirmPasswordToggle");
+
+/* ---------- STARTUP SESSION PERSISTENCE ---------- */
+(async () => {
+    // Check for Share Link hash fragment first
+    if (window.location.hash && window.location.hash.includes("share=")) {
+        await checkShareUrlOnLoad();
+        return;
+    }
+
+    // Check for valid stored JWT session
+    const token = getToken();
+    if (token) {
+        try {
+            const res = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.email) {
+                    showLoggedIn(data.email);
+                    return;
+                }
+            }
+        } catch (_) {}
+    }
+
+    // Default to Login overlay
+    setToken(null);
+    if (loginOverlay) loginOverlay.style.display = "flex";
+})();

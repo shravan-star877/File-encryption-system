@@ -38,7 +38,53 @@
                 <div class="login-badge">AES-256-GCM · Key never leaves device</div>
             </div>
 
-            <!-- Login forms removed -->
+            <!-- LOGIN FORM -->
+            <form id="loginForm" autocomplete="on">
+                <div class="form-group">
+                    <label for="loginEmail">Email Address</label>
+                    <input type="email" id="loginEmail" placeholder="name@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="loginPassword">Password</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="loginPassword" placeholder="••••••••" required>
+                        <button type="button" class="password-toggle-btn" id="loginPasswordToggle" title="Show password" aria-label="Toggle password visibility">👁️</button>
+                    </div>
+                </div>
+                <div class="error-message" id="loginError"></div>
+                <button type="submit" class="login-btn primary" id="loginSubmitBtn">Sign In</button>
+                <p class="login-switch">Don't have an account? <button type="button" class="link-btn" id="showRegisterBtn">Register</button></p>
+            </form>
+
+            <!-- REGISTER FORM -->
+            <form id="registerForm" autocomplete="on" style="display: none;">
+                <div class="form-group">
+                    <label for="regFullName">Full Name</label>
+                    <input type="text" id="regFullName" placeholder="John Doe">
+                </div>
+                <div class="form-group">
+                    <label for="regEmail">Email Address</label>
+                    <input type="email" id="regEmail" placeholder="name@example.com" required>
+                </div>
+                <div class="form-group">
+                    <label for="regPassword">Password</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="regPassword" placeholder="At least 6 characters" required>
+                        <button type="button" class="password-toggle-btn" id="regPasswordToggle" title="Show password" aria-label="Toggle password visibility">👁️</button>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="regConfirmPassword">Confirm Password</label>
+                    <div class="password-input-wrapper">
+                        <input type="password" id="regConfirmPassword" placeholder="Re-enter password" required>
+                        <button type="button" class="password-toggle-btn" id="regConfirmPasswordToggle" title="Show password" aria-label="Toggle password visibility">👁️</button>
+                    </div>
+                </div>
+                <div class="error-message" id="regError"></div>
+                <div id="regSuccess" style="display: none; color: var(--accent); font-size: 0.85rem; margin-bottom: 0.5rem; text-align: center;"></div>
+                <button type="submit" class="login-btn primary" id="regSubmitBtn">Create Account</button>
+                <p class="login-switch">Already have an account? <button type="button" class="link-btn" id="showLoginBtn">Sign In</button></p>
+            </form>
 
             <p class="login-footer-badge">Secure channel · All actions logged</p>
         </div>
@@ -51,7 +97,11 @@
             <span class="logo-tag">Cloud File Protection</span>
         </div>
         <div class="header-right">
-            <!-- User info removed -->
+            <div class="user-info" id="userInfo" style="display: none;">
+                <div class="user-avatar" id="userAvatar">?</div>
+                <span class="user-email" id="userDisplay"></span>
+                <button type="button" class="logout-btn" id="logoutBtn">Logout</button>
+            </div>
         </div>
     </header>
 
@@ -205,7 +255,7 @@
             <div class="modal-overlay" id="shareModalOverlay">
                 <div class="modal share-modal">
                     <h3>🔗 Zero-Knowledge Share Link</h3>
-                    <p class="modal-hint">Anyone with this link can decrypt and open the file. The key is in the URL fragment and is <strong>never sent to the server</strong>.</p>
+                    <p class="modal-hint">Share this link with the recipient. Send the Decryption Key separately through a secure channel.</p>
                     <div class="decrypt-key-row">
                         <input type="text" id="shareUrlInput" readonly class="key-input share-url-input">
                         <button type="button" class="btn primary small" id="copyShareUrlBtn">Copy link</button>
@@ -220,21 +270,45 @@
             <!-- Modal: Shared File Received View -->
             <div class="modal-overlay" id="sharedFileOverlay">
                 <div class="modal shared-file-modal">
-                    <h3>🎁 Shared File Received</h3>
-                    <p class="modal-hint">Decrypted client-side using Zero-Knowledge URL key.</p>
+                    <h3 id="sharedFileTitle">🔒 Shared Encrypted File</h3>
+                    <p class="modal-hint" id="sharedFileHint">Enter the decryption key provided by the sender to unlock this file.</p>
                     <div class="shared-file-card">
-                        <div class="shared-file-icon" id="sharedFileIcon">📄</div>
+                        <div class="shared-file-icon" id="sharedFileIcon">🔒</div>
                         <div class="shared-file-info">
                             <h4 id="sharedFileName">file.name</h4>
                             <p id="sharedFileSize">0 KB</p>
                         </div>
                     </div>
+
+                    <!-- Manual Decryption Key Section -->
+                    <div id="sharedKeySection" style="margin-top: 1rem;">
+                        <label for="sharedKeyInput" style="display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.4rem;">Enter Decryption Key:</label>
+                        <div class="decrypt-key-row" style="display: flex; gap: 0.5rem;">
+                            <input type="password" id="sharedKeyInput" class="key-input" placeholder="Paste decryption key..." style="flex: 1;">
+                            <button type="button" class="btn ghost small" id="sharedKeyToggle" title="Toggle visibility">👁</button>
+                        </div>
+                        <div id="sharedKeyError" class="error-message" style="margin-top: 0.4rem;"></div>
+                        <button type="button" class="btn primary" id="sharedKeyDecryptBtn" style="margin-top: 0.75rem; width: 100%;">Decrypt & View</button>
+                    </div>
+
                     <div id="sharedFilePreviewArea" class="shared-file-preview" style="display: none; margin-top: 1rem; text-align: center;">
                         <img id="sharedImagePreview" src="" alt="Shared preview" style="max-width: 100%; max-height: 250px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
                     </div>
                     <div class="modal-actions" style="margin-top: 1.5rem;">
                         <button type="button" class="btn ghost" id="sharedFileClose">Close</button>
-                        <a id="sharedFileDownloadBtn" href="#" download class="btn primary">Download File</a>
+                        <a id="sharedFileDownloadBtn" href="#" download class="btn primary" style="display: none;">Download File</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Modal: Logout Confirmation -->
+            <div class="modal-overlay" id="logoutModalOverlay">
+                <div class="modal logout-modal">
+                    <h3>🚪 Confirm Logout</h3>
+                    <p class="modal-hint" style="margin-top: 0.5rem; margin-bottom: 1.5rem;">Are you sure you want to logout?</p>
+                    <div class="modal-actions" style="justify-content: center; gap: 1rem;">
+                        <button type="button" class="btn ghost" id="logoutModalCancel">Cancel</button>
+                        <button type="button" class="btn danger" id="logoutModalConfirm">Logout</button>
                     </div>
                 </div>
             </div>
