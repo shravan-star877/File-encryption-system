@@ -14,12 +14,29 @@ const nodemailer = require('nodemailer');
 const mongoose = require('mongoose');
 
 let putBlob = null;
+let getBlob = null;
 let delBlob = null;
 try {
   const blobSdk = require('@vercel/blob');
   putBlob = blobSdk.put;
+  getBlob = blobSdk.get;
   delBlob = blobSdk.del;
 } catch (_) { }
+
+function getBlobToken() {
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  return token && typeof token === 'string' ? token.trim() : null;
+}
+
+async function fetchPrivateBlobBuffer(blobRef) {
+  if (!getBlob || !blobRef) return null;
+  const token = getBlobToken();
+  if (!token) return null;
+  const result = await getBlob(blobRef, { access: 'private', token });
+  if (!result || result.statusCode !== 200 || !result.stream) return null;
+  const arrayBuf = await new Response(result.stream).arrayBuffer();
+  return Buffer.from(arrayBuf);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -651,7 +668,7 @@ app.post('/api/files', authMiddleware, (req, res, next) => {
       const blobToken = String(process.env.BLOB_READ_WRITE_TOKEN).trim();
       console.log(`[Upload Diagnostic] Initiating Vercel Blob upload for fileId: ${fileId}...`);
       const blob = await putBlob(`uploads/${fileId}`, req.file.buffer, {
-        access: 'public',
+        access: 'private',
         addRandomSuffix: false,
         contentType: encrypted ? 'application/octet-stream' : (req.file.mimetype || 'application/octet-stream'),
         token: blobToken,
@@ -699,7 +716,8 @@ app.post('/api/files', authMiddleware, (req, res, next) => {
     return res.status(mongoErr.status).json({ error: `Failed to save file metadata: ${mongoErr.error}` });
   }
   audit('UPLOAD', req.user.email, `file: ${entry.originalName} id: ${entry.id} expiresAt: ${expiresAt || 'never'}`);
-  res.status(201).json(entry);
+  const { blobUrl: _omitBlobUrl, ...safeEntry } = entry;
+  res.status(201).json(safeEntry);
 });
 
 // GET /api/files — list current user's files
@@ -744,16 +762,14 @@ app.get('/api/files/:id', async (req, res) => {
 
     if (entry.blobUrl) {
       try {
-        const blobRes = await fetch(entry.blobUrl);
-        if (!blobRes.ok) return res.status(404).json({ error: 'Cloud blob file not found' });
-        const arrayBuf = await blobRes.arrayBuffer();
-        const buf = Buffer.from(arrayBuf);
+        const buf = await fetchPrivateBlobBuffer(entry.blobUrl);
+        if (!buf) return res.status(404).json({ error: 'Cloud blob file not found' });
         audit(auditAction, reqUserEmail || 'unauthenticated_share', `file: ${entry.originalName} id: ${entry.id}`);
         res.setHeader('Content-Type', 'application/octet-stream');
         res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(entry.originalName)}"`);
         return res.send(buf);
       } catch (err) {
-        console.error('[BlobDownload] Error fetching blob:', sanitizeErrorMessage(err.message));
+        console.error('[BlobDownload] Error fetching private blob:', sanitizeErrorMessage(err.message));
         return res.status(500).json({ error: 'Failed to download cloud file' });
       }
     }
