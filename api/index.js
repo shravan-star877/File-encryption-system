@@ -1,4 +1,6 @@
-require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+if (!process.env.VERCEL) {
+  require('dotenv').config({ path: require('path').join(__dirname, '.env') });
+}
 const express = require('express');
 const path = require('path');
 const os = require('os');
@@ -27,7 +29,7 @@ const DATA_DIR = IS_VERCEL ? '/tmp' : __dirname;
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const FILES_FILE = path.join(DATA_DIR, 'files.json');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
-const MONGO_REQUIRED_IN_PRODUCTION = IS_VERCEL && !process.env.MONGODB_URI;
+const MONGO_REQUIRED_IN_PRODUCTION = IS_VERCEL && !resolveMongoUri();
 const BLOB_REQUIRED_IN_PRODUCTION = IS_VERCEL && !process.env.BLOB_READ_WRITE_TOKEN;
 const LOG_FILE = path.join(DATA_DIR, 'audit.log');
 const RESET_EMAIL_FROM = process.env.RESET_EMAIL_FROM || 'no-reply@example.com';
@@ -56,12 +58,48 @@ function sanitizeErrorMessage(msg) {
     .substring(0, 250);
 }
 
+function resolveMongoUri() {
+  const raw = process.env.MONGODB_URI;
+  if (!raw || typeof raw !== 'string') return null;
+  let uri = raw.trim();
+  if ((uri.startsWith('"') && uri.endsWith('"')) || (uri.startsWith("'") && uri.endsWith("'"))) {
+    uri = uri.slice(1, -1).trim();
+  }
+  return uri || null;
+}
+
+function diagnoseMongoUriSafe(uri) {
+  if (!uri) return { present: false, valid: false, issues: ['MISSING'] };
+  const issues = [];
+  if (/<[^>]+>/.test(uri)) issues.push('PLACEHOLDER_TEXT');
+  if (!/^mongodb(\+srv)?:\/\//i.test(uri)) issues.push('INVALID_SCHEME');
+  if (/\s/.test(uri)) issues.push('EMBEDDED_WHITESPACE');
+  const credsMatch = uri.match(/^mongodb\+srv:\/\/([^/?]+)@/i) || uri.match(/^mongodb:\/\/([^/?]+)@/i);
+  if (!credsMatch) {
+    issues.push('MISSING_CREDENTIALS');
+  } else {
+    const creds = credsMatch[1];
+    const colonIdx = creds.indexOf(':');
+    if (colonIdx <= 0) issues.push('MISSING_PASSWORD');
+    if (creds.includes('@')) issues.push('MALFORMED_CREDENTIALS');
+  }
+  return { present: true, valid: issues.length === 0, issues };
+}
+
+function getEnvPresence() {
+  return {
+    MONGODB_URI: resolveMongoUri() ? 'PRESENT' : 'MISSING',
+    JWT_SECRET: process.env.JWT_SECRET ? 'PRESENT' : 'MISSING',
+    BLOB_READ_WRITE_TOKEN: process.env.BLOB_READ_WRITE_TOKEN ? 'PRESENT' : 'MISSING',
+  };
+}
+
 // --- MongoDB Atlas Setup (cached connection for serverless) ---
 let isMongoConnected = false;
-const MONGODB_URI = process.env.MONGODB_URI;
 
 async function ensureMongoReady() {
-  if (!MONGODB_URI) {
+  const mongoUri = resolveMongoUri();
+  if (!mongoUri) {
     if (IS_VERCEL) {
       const err = new Error('Missing MONGODB_URI for production persistence');
       err.code = 'MONGO_NOT_CONFIGURED';
@@ -70,14 +108,23 @@ async function ensureMongoReady() {
     return false;
   }
 
+  const uriCheck = diagnoseMongoUriSafe(mongoUri);
+  if (!uriCheck.valid) {
+    const err = new Error(`MONGODB_URI format invalid: ${uriCheck.issues.join(', ')}`);
+    err.code = 'MONGO_URI_INVALID';
+    throw err;
+  }
+
   if (mongoose.connection.readyState === 1) {
     isMongoConnected = true;
     return true;
   }
 
   if (!global.__secureCloudMongoPromise) {
-    global.__secureCloudMongoPromise = mongoose.connect(MONGODB_URI, {
+    global.__secureCloudMongoPromise = mongoose.connect(mongoUri, {
       serverSelectionTimeoutMS: 10000,
+      maxPoolSize: 10,
+      bufferCommands: false,
     }).then(() => {
       isMongoConnected = true;
       console.log('[Database] Connected to MongoDB (database:', mongoose.connection.name + ', collection: users/files)');
@@ -85,7 +132,7 @@ async function ensureMongoReady() {
     }).catch((err) => {
       global.__secureCloudMongoPromise = null;
       isMongoConnected = false;
-      console.error('[Database] MongoDB connection error:', err.message);
+      console.error('[Database] MongoDB connection error:', sanitizeErrorMessage(err.message));
       throw err;
     });
   }
@@ -95,14 +142,27 @@ async function ensureMongoReady() {
 }
 
 function useMongoStorage() {
-  return !!MONGODB_URI;
+  return !!resolveMongoUri();
 }
 
 function mongoErrorResponse(err) {
   if (err && err.code === 'MONGO_NOT_CONFIGURED') {
     return { status: 503, error: 'Database is not configured. Missing MONGODB_URI.' };
   }
-  return { status: 503, error: `Database connection failed. ${sanitizeErrorMessage(err && err.message)}` };
+  if (err && err.code === 'MONGO_URI_INVALID') {
+    return {
+      status: 503,
+      error: 'Database connection string is malformed. Check MONGODB_URI in Vercel Production (no quotes, no placeholders, URL-encode special characters in password).',
+    };
+  }
+  const msg = sanitizeErrorMessage(err && err.message);
+  if (/bad auth|authentication failed/i.test(msg)) {
+    return {
+      status: 503,
+      error: 'Database authentication failed. Verify MONGODB_URI in Vercel Production uses the Atlas database username and URL-encoded password (not your Atlas account login).',
+    };
+  }
+  return { status: 503, error: `Database connection failed. ${msg}` };
 }
 
 const UserSchema = new mongoose.Schema({
@@ -142,7 +202,7 @@ function getPublicBaseUrl(req) {
 }
 
 function throwIfProductionStorageMissing() {
-  if (IS_VERCEL && !process.env.MONGODB_URI) {
+  if (IS_VERCEL && !resolveMongoUri()) {
     const err = new Error('Missing MONGODB_URI for production user persistence');
     err.statusCode = 503;
     throw err;
@@ -404,18 +464,29 @@ function getAuthEmailFromRequest(req) {
 
 app.get('/api/health', async (req, res) => {
   const base = getPublicBaseUrl(req);
+  const mongoUri = resolveMongoUri();
+  const uriCheck = diagnoseMongoUriSafe(mongoUri);
   let mongoReady = false;
-  if (MONGODB_URI) {
+  let mongoError = null;
+  if (mongoUri && uriCheck.valid) {
     try {
       mongoReady = await ensureMongoReady();
-    } catch (_) { }
+    } catch (err) {
+      mongoError = mongoErrorResponse(err).error;
+    }
+  } else if (mongoUri) {
+    mongoError = 'MONGODB_URI format invalid: ' + uriCheck.issues.join(', ');
   }
   res.json({
     ok: true,
     message: 'SecureCloud API',
-    mongoConfigured: !!MONGODB_URI,
+    env: getEnvPresence(),
+    mongoConfigured: !!mongoUri,
+    mongoUriValid: uriCheck.valid,
+    mongoUriIssues: uriCheck.valid ? [] : uriCheck.issues,
     mongoActive: mongoReady,
     mongoDatabase: mongoReady ? mongoose.connection.name : null,
+    mongoError: mongoError || null,
     blobConfigured: !!process.env.BLOB_READ_WRITE_TOKEN,
     blobActive: !!(putBlob && process.env.BLOB_READ_WRITE_TOKEN),
     jwtConfigured: !!process.env.JWT_SECRET,
@@ -432,7 +503,7 @@ app.post('/api/login', async (req, res) => {
   if (!normalizedEmail || !password) {
     return res.status(400).json({ error: 'Email and password required' });
   }
-  if (IS_VERCEL && !MONGODB_URI) {
+  if (IS_VERCEL && !resolveMongoUri()) {
     audit('LOGIN_FAIL', normalizedEmail, 'MONGODB_URI missing in production');
     return res.status(503).json({ error: 'Authentication storage is not configured. Missing MONGODB_URI.' });
   }
@@ -474,7 +545,7 @@ app.post('/api/register', async (req, res) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
     return res.status(400).json({ error: 'Invalid email format' });
   }
-  if (IS_VERCEL && !MONGODB_URI) {
+  if (IS_VERCEL && !resolveMongoUri()) {
     audit('REGISTER_FAIL', trimmed, 'MONGODB_URI missing in production');
     return res.status(503).json({ error: 'User database is not configured. Missing MONGODB_URI.' });
   }
