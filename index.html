@@ -8,17 +8,41 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <title>VaultGuard — Zero-Knowledge Cloud File Protection</title>
     <script>
-      (function(){var p=location.pathname,s=location.search;if(s.indexOf('token=')>=0){if(p.indexOf('verify-email')>=0)document.documentElement.classList.add('early-verify');else if(p.indexOf('reset-password')>=0)document.documentElement.classList.add('early-reset');}}());
+        (function () { var p = location.pathname, s = location.search; if (s.indexOf('token=') >= 0) { if (p.indexOf('verify-email') >= 0) document.documentElement.classList.add('early-verify'); else if (p.indexOf('reset-password') >= 0) document.documentElement.classList.add('early-reset'); } }());
     </script>
     <style id="early-reset-style">
-        body.show-reset-form #registerForm,.show-reset-form #loginForm,.show-reset-form #loginSwitch,.show-reset-form #forgotForm,.show-reset-form #forgotSwitch,.show-reset-form #verifyEmailPanel{display:none!important}
-        body.show-reset-form #resetForm,.show-reset-form #resetSwitch{display:block!important}
-        body.show-verify-form #registerForm,.show-verify-form #loginForm,.show-verify-form #loginSwitch,.show-verify-form #forgotForm,.show-verify-form #resetForm,.show-verify-form #resetSwitch{display:none!important}
-        body.show-verify-form #verifyEmailPanel{display:block!important}
+        body.show-reset-form #registerForm,
+        .show-reset-form #loginForm,
+        .show-reset-form #loginSwitch,
+        .show-reset-form #forgotForm,
+        .show-reset-form #forgotSwitch,
+        .show-reset-form #verifyEmailPanel {
+            display: none !important
+        }
+
+        body.show-reset-form #resetForm,
+        .show-reset-form #resetSwitch {
+            display: block !important
+        }
+
+        body.show-verify-form #registerForm,
+        .show-verify-form #loginForm,
+        .show-verify-form #loginSwitch,
+        .show-verify-form #forgotForm,
+        .show-verify-form #resetForm,
+        .show-verify-form #resetSwitch {
+            display: none !important
+        }
+
+        body.show-verify-form #verifyEmailPanel {
+            display: block !important
+        }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -28,11 +52,12 @@
     <div class="scanline" aria-hidden="true"></div>
 
     <!-- LOGIN — Secure Access Terminal -->
-    <div class="login-overlay" id="loginOverlay">
+    <div class="login-overlay" id="loginOverlay" style="display: none;">
         <div class="login-card">
             <div class="login-header">
                 <div class="login-logo">
-                    <span class="logo-bracket">[</span><span class="logo-accent">VAULT</span>GUARD<span class="logo-bracket">]</span>
+                    <span class="logo-bracket">[</span><span class="logo-accent">VAULT</span>GUARD<span
+                        class="logo-bracket">]</span>
                 </div>
                 <p class="login-subtitle">Zero-Knowledge Cloud Protection</p>
                 <div class="login-badge">AES-256-GCM · Key never leaves device</div>
@@ -48,12 +73,14 @@
                     <label for="loginPassword">Password</label>
                     <div class="password-input-wrapper">
                         <input type="password" id="loginPassword" placeholder="••••••••" required>
-                        <button type="button" class="password-toggle-btn" id="loginPasswordToggle" title="Show password" aria-label="Toggle password visibility">👁️</button>
+                        <button type="button" class="password-toggle-btn" id="loginPasswordToggle" title="Show password"
+                            aria-label="Toggle password visibility">👁️</button>
                     </div>
                 </div>
                 <div class="error-message" id="loginError"></div>
                 <button type="submit" class="login-btn primary" id="loginSubmitBtn">Sign In</button>
-                <p class="login-switch">Don't have an account? <button type="button" class="link-btn" id="showRegisterBtn">Register</button></p>
+                <p class="login-switch">Don't have an account? <button type="button" class="link-btn"
+                        id="showRegisterBtn">Register</button></p>
             </form>
 
             <!-- REGISTER FORM -->
@@ -70,20 +97,25 @@
                     <label for="regPassword">Password</label>
                     <div class="password-input-wrapper">
                         <input type="password" id="regPassword" placeholder="At least 6 characters" required>
-                        <button type="button" class="password-toggle-btn" id="regPasswordToggle" title="Show password" aria-label="Toggle password visibility">👁️</button>
+                        <button type="button" class="password-toggle-btn" id="regPasswordToggle" title="Show password"
+                            aria-label="Toggle password visibility">👁️</button>
                     </div>
                 </div>
                 <div class="form-group">
                     <label for="regConfirmPassword">Confirm Password</label>
                     <div class="password-input-wrapper">
                         <input type="password" id="regConfirmPassword" placeholder="Re-enter password" required>
-                        <button type="button" class="password-toggle-btn" id="regConfirmPasswordToggle" title="Show password" aria-label="Toggle password visibility">👁️</button>
+                        <button type="button" class="password-toggle-btn" id="regConfirmPasswordToggle"
+                            title="Show password" aria-label="Toggle password visibility">👁️</button>
                     </div>
                 </div>
                 <div class="error-message" id="regError"></div>
-                <div id="regSuccess" style="display: none; color: var(--accent); font-size: 0.85rem; margin-bottom: 0.5rem; text-align: center;"></div>
+                <div id="regSuccess"
+                    style="display: none; color: var(--accent); font-size: 0.85rem; margin-bottom: 0.5rem; text-align: center;">
+                </div>
                 <button type="submit" class="login-btn primary" id="regSubmitBtn">Create Account</button>
-                <p class="login-switch">Already have an account? <button type="button" class="link-btn" id="showLoginBtn">Sign In</button></p>
+                <p class="login-switch">Already have an account? <button type="button" class="link-btn"
+                        id="showLoginBtn">Sign In</button></p>
             </form>
 
             <p class="login-footer-badge">Secure channel · All actions logged</p>
@@ -93,7 +125,8 @@
     <!-- HEADER -->
     <header class="header">
         <div class="logo">
-            <span class="logo-bracket">[</span><span class="logo-accent">VAULT</span>GUARD<span class="logo-bracket">]</span>
+            <span class="logo-bracket">[</span><span class="logo-accent">VAULT</span>GUARD<span
+                class="logo-bracket">]</span>
             <span class="logo-tag">Cloud File Protection</span>
         </div>
         <div class="header-right">
@@ -111,7 +144,8 @@
 
             <div class="dashboard-hero">
                 <h1>Cloud File Protection</h1>
-                <p>Upload any file to the cloud — we generate a unique encryption key. Only with that key can the file be decrypted and opened. Zero-knowledge. Military-grade.</p>
+                <p>Upload any file to the cloud — we generate a unique encryption key. Only with that key can the file
+                    be decrypted and opened. Zero-knowledge. Military-grade.</p>
                 <div class="hero-badges">
                     <span class="badge">AES-256-GCM</span>
                     <span class="badge">PBKDF2 100k</span>
@@ -131,7 +165,12 @@
                     <p class="panel-desc">Choose the file you want to protect in the cloud. Any format.</p>
                     <div class="upload-zone" id="uploadArea">
                         <div class="upload-icon">
-                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="1.5">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="17 8 12 3 7 8" />
+                                <line x1="12" y1="3" x2="12" y2="15" />
+                            </svg>
                         </div>
                         <h4>Drop file or click to upload</h4>
                         <p>File will be encrypted before it reaches the cloud</p>
@@ -148,19 +187,24 @@
                     </div>
 
                     <h2 class="panel-title"><span class="panel-num">02</span> Encryption key</h2>
-                    <p class="panel-desc">We generate a unique key for this file. Save it — without it, the file cannot be decrypted.</p>
+                    <p class="panel-desc">We generate a unique key for this file. Save it — without it, the file cannot
+                        be decrypted.</p>
                     <div class="key-block">
                         <div class="key-row">
-                            <input type="password" id="encryptionKey" placeholder="Paste key (to decrypt) or generate new (to encrypt)" class="key-input">
+                            <input type="password" id="encryptionKey"
+                                placeholder="Paste key (to decrypt) or generate new (to encrypt)" class="key-input">
                             <button type="button" class="btn-icon" id="keyToggle" title="Show/hide key">👁</button>
                             <button type="button" class="btn primary small" id="generateKey">Generate key</button>
-                            <button type="button" class="btn secondary small" id="copyKeyBtn" title="Copy key">Copy</button>
+                            <button type="button" class="btn secondary small" id="copyKeyBtn"
+                                title="Copy key">Copy</button>
                         </div>
-                        <p class="key-warning">Store this key securely. We do not store it. Loss = permanent lockout.</p>
+                        <p class="key-warning">Store this key securely. We do not store it. Loss = permanent lockout.
+                        </p>
                     </div>
 
                     <h2 class="panel-title"><span class="panel-num">03</span> File expiry (optional)</h2>
-                    <p class="panel-desc">Choose when this file should automatically expire. Expired files are permanently blocked from access.</p>
+                    <p class="panel-desc">Choose when this file should automatically expire. Expired files are
+                        permanently blocked from access.</p>
                     <div class="expiry-block">
                         <select id="fileExpiry" class="expiry-select">
                             <option value="never" selected>Never (No expiry)</option>
@@ -171,7 +215,8 @@
                     </div>
 
                     <h2 class="panel-title"><span class="panel-num">04</span> Encrypt & upload to cloud</h2>
-                    <p class="panel-desc">File is encrypted in your browser, then stored. The cloud only sees ciphertext.</p>
+                    <p class="panel-desc">File is encrypted in your browser, then stored. The cloud only sees
+                        ciphertext.</p>
                     <div class="action-row">
                         <button class="btn primary large" id="encryptBtn">Encrypt & upload to cloud</button>
                     </div>
@@ -182,7 +227,8 @@
             <section class="panel" id="panel-access">
                 <div class="panel-card">
                     <h2 class="panel-title">Your protected files</h2>
-                    <p class="panel-desc">To open a file: submit its encryption key when prompted. File will decrypt and download (or open).</p>
+                    <p class="panel-desc">To open a file: submit its encryption key when prompted. File will decrypt and
+                        download (or open).</p>
                     <div class="files-toolbar">
                         <span class="files-count" id="filesCount">0 files</span>
                         <button type="button" class="btn ghost small" id="refreshFiles">Refresh</button>
@@ -217,9 +263,11 @@
             <div class="modal-overlay" id="deleteConfirmOverlay">
                 <div class="modal decrypt-modal">
                     <h3>Confirm deletion</h3>
-                    <p class="modal-hint">Enter this file's <strong>decryption key</strong> (special key) to permanently delete it.</p>
+                    <p class="modal-hint">Enter this file's <strong>decryption key</strong> (special key) to permanently
+                        delete it.</p>
                     <div class="decrypt-key-row">
-                        <input type="password" id="deleteKeyInput" placeholder="Paste your special key here" class="key-input">
+                        <input type="password" id="deleteKeyInput" placeholder="Paste your special key here"
+                            class="key-input">
                         <button type="button" class="btn-icon" id="deleteKeyToggle" title="Show/hide">👁</button>
                     </div>
                     <div id="deleteModalError" class="modal-error"></div>
@@ -255,12 +303,14 @@
             <div class="modal-overlay" id="shareModalOverlay">
                 <div class="modal share-modal">
                     <h3>🔗 Zero-Knowledge Share Link</h3>
-                    <p class="modal-hint">Share this link with the recipient. Send the Decryption Key separately through a secure channel.</p>
+                    <p class="modal-hint">Share this link with the recipient. Send the Decryption Key separately through
+                        a secure channel.</p>
                     <div class="decrypt-key-row">
                         <input type="text" id="shareUrlInput" readonly class="key-input share-url-input">
                         <button type="button" class="btn primary small" id="copyShareUrlBtn">Copy link</button>
                     </div>
-                    <div id="shareModalMsg" class="modal-hint" style="color: var(--accent); display: none; margin-top: 0.5rem;">Link copied to clipboard!</div>
+                    <div id="shareModalMsg" class="modal-hint"
+                        style="color: var(--accent); display: none; margin-top: 0.5rem;">Link copied to clipboard!</div>
                     <div class="modal-actions">
                         <button type="button" class="btn ghost" id="shareModalCancel">Close</button>
                     </div>
@@ -271,7 +321,8 @@
             <div class="modal-overlay" id="sharedFileOverlay">
                 <div class="modal shared-file-modal">
                     <h3 id="sharedFileTitle">🔒 Shared Encrypted File</h3>
-                    <p class="modal-hint" id="sharedFileHint">Enter the decryption key provided by the sender to unlock this file.</p>
+                    <p class="modal-hint" id="sharedFileHint">Enter the decryption key provided by the sender to unlock
+                        this file.</p>
                     <div class="shared-file-card">
                         <div class="shared-file-icon" id="sharedFileIcon">🔒</div>
                         <div class="shared-file-info">
@@ -282,21 +333,29 @@
 
                     <!-- Manual Decryption Key Section -->
                     <div id="sharedKeySection" style="margin-top: 1rem;">
-                        <label for="sharedKeyInput" style="display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.4rem;">Enter Decryption Key:</label>
+                        <label for="sharedKeyInput"
+                            style="display: block; font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.4rem;">Enter
+                            Decryption Key:</label>
                         <div class="decrypt-key-row" style="display: flex; gap: 0.5rem;">
-                            <input type="password" id="sharedKeyInput" class="key-input" placeholder="Paste decryption key..." style="flex: 1;">
-                            <button type="button" class="btn ghost small" id="sharedKeyToggle" title="Toggle visibility">👁</button>
+                            <input type="password" id="sharedKeyInput" class="key-input"
+                                placeholder="Paste decryption key..." style="flex: 1;">
+                            <button type="button" class="btn ghost small" id="sharedKeyToggle"
+                                title="Toggle visibility">👁</button>
                         </div>
                         <div id="sharedKeyError" class="error-message" style="margin-top: 0.4rem;"></div>
-                        <button type="button" class="btn primary" id="sharedKeyDecryptBtn" style="margin-top: 0.75rem; width: 100%;">Decrypt & View</button>
+                        <button type="button" class="btn primary" id="sharedKeyDecryptBtn"
+                            style="margin-top: 0.75rem; width: 100%;">Decrypt & View</button>
                     </div>
 
-                    <div id="sharedFilePreviewArea" class="shared-file-preview" style="display: none; margin-top: 1rem; text-align: center;">
-                        <img id="sharedImagePreview" src="" alt="Shared preview" style="max-width: 100%; max-height: 250px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
+                    <div id="sharedFilePreviewArea" class="shared-file-preview"
+                        style="display: none; margin-top: 1rem; text-align: center;">
+                        <img id="sharedImagePreview" src="" alt="Shared preview"
+                            style="max-width: 100%; max-height: 250px; border-radius: var(--radius-sm); border: 1px solid var(--border);">
                     </div>
                     <div class="modal-actions" style="margin-top: 1.5rem;">
                         <button type="button" class="btn ghost" id="sharedFileClose">Close</button>
-                        <a id="sharedFileDownloadBtn" href="#" download class="btn primary" style="display: none;">Download File</a>
+                        <a id="sharedFileDownloadBtn" href="#" download class="btn primary"
+                            style="display: none;">Download File</a>
                     </div>
                 </div>
             </div>
@@ -305,7 +364,8 @@
             <div class="modal-overlay" id="logoutModalOverlay">
                 <div class="modal logout-modal">
                     <h3>🚪 Confirm Logout</h3>
-                    <p class="modal-hint" style="margin-top: 0.5rem; margin-bottom: 1.5rem;">Are you sure you want to logout?</p>
+                    <p class="modal-hint" style="margin-top: 0.5rem; margin-bottom: 1.5rem;">Are you sure you want to
+                        logout?</p>
                     <div class="modal-actions" style="justify-content: center; gap: 1rem;">
                         <button type="button" class="btn ghost" id="logoutModalCancel">Cancel</button>
                         <button type="button" class="btn danger" id="logoutModalConfirm">Logout</button>

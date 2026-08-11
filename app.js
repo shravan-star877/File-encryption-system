@@ -26,39 +26,102 @@ const statusMessage = document.getElementById("statusMessage");
 
 /* ---------- API & AUTH ---------- */
 const API_BASE = ""; // Same origin when served by backend
+const AUTH_STORAGE_KEYS = ["securecloud_token", "securecloud_session", "securecloud_user"];
+
+function clearAuthState() {
+    AUTH_STORAGE_KEYS.forEach((key) => {
+        localStorage.removeItem(key);
+        sessionStorage.removeItem(key);
+    });
+    if (typeof document !== "undefined") {
+        document.cookie = "securecloud_token=; Max-Age=0; path=/; SameSite=Lax";
+        document.cookie = "securecloud_session=; Max-Age=0; path=/; SameSite=Lax";
+    }
+}
 
 function getToken() {
-    return localStorage.getItem("securecloud_token");
+    const token = localStorage.getItem("securecloud_token");
+    if (!token || typeof token !== "string") return null;
+    const trimmed = token.trim();
+    return trimmed ? trimmed : null;
 }
 
 function setToken(token) {
-    if (token) localStorage.setItem("securecloud_token", token);
-    else localStorage.removeItem("securecloud_token");
+    if (token && typeof token === "string" && token.trim()) {
+        localStorage.setItem("securecloud_token", token.trim());
+        sessionStorage.setItem("securecloud_session", "active");
+        return;
+    }
+    clearAuthState();
+}
+
+function showLoginScreen() {
+    if (loginOverlay) loginOverlay.style.display = "flex";
+    const userInfo = document.getElementById("userInfo");
+    if (userInfo) userInfo.style.display = "none";
+    if (userDisplay) userDisplay.textContent = "";
+    if (userAvatar) userAvatar.textContent = "?";
 }
 
 function showLoggedIn(email) {
+    if (!email || typeof email !== "string") {
+        clearAuthState();
+        showLoginScreen();
+        return;
+    }
     if (loginOverlay) loginOverlay.style.display = "none";
     const userInfo = document.getElementById("userInfo");
     if (userInfo) userInfo.style.display = "flex";
     if (userDisplay) userDisplay.textContent = email;
     if (userAvatar) userAvatar.textContent = (email[0] || "?").toUpperCase();
+    localStorage.setItem("securecloud_user", email);
     loadMyFiles();
 }
 
 function logout() {
-    setToken(null);
+    clearAuthState();
     const userInfo = document.getElementById("userInfo");
     if (userInfo) userInfo.style.display = "none";
     if (userDisplay) userDisplay.textContent = "";
     if (userAvatar) userAvatar.textContent = "?";
     const filesList = document.getElementById("filesList");
     if (filesList) filesList.innerHTML = `<li class="files-empty"><div class="empty-icon">📂</div><div>Log in to view your files</div></li>`;
-    if (loginOverlay) loginOverlay.style.display = "flex";
+    showLoginScreen();
 }
 
 function authHeaders() {
     const token = getToken();
     return token ? { "Authorization": `Bearer ${token}` } : {};
+}
+
+async function restoreAuthSession() {
+    const token = getToken();
+    if (!token) {
+        clearAuthState();
+        showLoginScreen();
+        return;
+    }
+
+    try {
+        const res = await fetch(`${API_BASE}/api/me`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) {
+            clearAuthState();
+            showLoginScreen();
+            return;
+        }
+
+        const data = await res.json().catch(() => ({}));
+        if (!data || !data.email) {
+            clearAuthState();
+            showLoginScreen();
+            return;
+        }
+
+        showLoggedIn(data.email);
+    } catch (_) {
+        clearAuthState();
+        showLoginScreen();
+    }
 }
 
 /* ---------- CRYPTO (AES-256-GCM, key from passphrase) ---------- */
@@ -254,7 +317,7 @@ let _sharedObjectUrl = null;
 async function showShareModal(id, name, isEncrypted) {
     const baseUrl = window.location.origin + window.location.pathname;
     const shareUrl = `${baseUrl}#share=${encodeURIComponent(id)}`;
-    
+
     const input = document.getElementById("shareUrlInput");
     const msg = document.getElementById("shareModalMsg");
     if (input) input.value = shareUrl;
@@ -428,7 +491,7 @@ async function checkShareUrlOnLoad() {
     console.log("[ShareLink] Checking URL hash on page load:", window.location.hash);
     const hash = String(window.location.hash || "");
     if (!hash || !hash.includes("share=")) return;
-    
+
     if (loginOverlay) loginOverlay.style.display = "none";
 
     const params = new URLSearchParams(hash.replace(/^#/, ""));
@@ -575,76 +638,76 @@ if (decryptKeyToggleEl) {
 const decryptModalConfirmEl = document.getElementById("decryptModalConfirm");
 if (decryptModalConfirmEl) {
     decryptModalConfirmEl.addEventListener("click", async () => {
-    const keyInput = document.getElementById("decryptKeyInput");
-    const keyStr = normalizeKey(keyInput.value || "");
-    const errEl = document.getElementById("decryptModalError");
-    const openAfter = document.getElementById("openAfterDownload");
-    const confirmBtn = document.getElementById("decryptModalConfirm");
-    if (!keyStr) {
-        errEl.textContent = "Please paste your decryption key first.";
-        return;
-    }
-    if (!_decryptFileId || !_decryptFileName) return;
-    errEl.textContent = "";
-    confirmBtn.disabled = true;
-    confirmBtn.textContent = "Decrypting…";
-    try {
-        const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(_decryptFileId)}`, { headers: authHeaders() });
-        if (res.status === 410) {
-            errEl.textContent = "This file has expired.";
-            showStatus("This file has expired.");
-            loadMyFiles();
+        const keyInput = document.getElementById("decryptKeyInput");
+        const keyStr = normalizeKey(keyInput.value || "");
+        const errEl = document.getElementById("decryptModalError");
+        const openAfter = document.getElementById("openAfterDownload");
+        const confirmBtn = document.getElementById("decryptModalConfirm");
+        if (!keyStr) {
+            errEl.textContent = "Please paste your decryption key first.";
             return;
         }
-        if (!res.ok) throw new Error("Download failed");
-        const blob = await res.blob();
-        const buf = await blob.arrayBuffer();
-        const decrypted = await decryptFile(buf, keyStr);
-        const name = _decryptFileName || "download";
-        const ext = (name.split(".").pop() || "").toLowerCase();
-        const mimeByExt = {
-            jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
-            webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", ico: "image/x-icon",
-            pdf: "application/pdf", webm: "video/webm", mp4: "video/mp4", ogg: "video/ogg",
-            mp3: "audio/mpeg", wav: "audio/wav", txt: "text/plain", html: "text/html",
-            htm: "text/html", json: "application/json", xml: "application/xml"
-        };
-        const mimeType = mimeByExt[ext] || "application/octet-stream";
-        const data = new Blob([decrypted], { type: mimeType });
-        const url = URL.createObjectURL(data);
-        const viewableTypes = ["pdf", "jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "webm", "mp4", "ogg", "mp3", "wav", "txt", "html", "htm", "json", "xml"];
-        const shouldOpen = openAfter && openAfter.checked && viewableTypes.includes(ext);
-        if (shouldOpen) {
-            window.open(url, "_blank", "noopener");
-            setTimeout(() => URL.revokeObjectURL(url), 30000);
-        } else {
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
-        }
-
+        if (!_decryptFileId || !_decryptFileName) return;
+        errEl.textContent = "";
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = "Decrypting…";
         try {
-            await fetch(`${API_BASE}/api/files/${encodeURIComponent(_decryptFileId)}`, { method: "DELETE", headers: authHeaders() });
-        } catch (e) {}
+            const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(_decryptFileId)}`, { headers: authHeaders() });
+            if (res.status === 410) {
+                errEl.textContent = "This file has expired.";
+                showStatus("This file has expired.");
+                loadMyFiles();
+                return;
+            }
+            if (!res.ok) throw new Error("Download failed");
+            const blob = await res.blob();
+            const buf = await blob.arrayBuffer();
+            const decrypted = await decryptFile(buf, keyStr);
+            const name = _decryptFileName || "download";
+            const ext = (name.split(".").pop() || "").toLowerCase();
+            const mimeByExt = {
+                jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", gif: "image/gif",
+                webp: "image/webp", bmp: "image/bmp", svg: "image/svg+xml", ico: "image/x-icon",
+                pdf: "application/pdf", webm: "video/webm", mp4: "video/mp4", ogg: "video/ogg",
+                mp3: "audio/mpeg", wav: "audio/wav", txt: "text/plain", html: "text/html",
+                htm: "text/html", json: "application/json", xml: "application/xml"
+            };
+            const mimeType = mimeByExt[ext] || "application/octet-stream";
+            const data = new Blob([decrypted], { type: mimeType });
+            const url = URL.createObjectURL(data);
+            const viewableTypes = ["pdf", "jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "webm", "mp4", "ogg", "mp3", "wav", "txt", "html", "htm", "json", "xml"];
+            const shouldOpen = openAfter && openAfter.checked && viewableTypes.includes(ext);
+            if (shouldOpen) {
+                window.open(url, "_blank", "noopener");
+                setTimeout(() => URL.revokeObjectURL(url), 30000);
+            } else {
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+            }
 
-        hideDecryptModal();
-        showStatus(shouldOpen ? "File decrypted and opened. Removed from cloud." : "File decrypted and downloaded. Removed from cloud.");
-        loadMyFiles();
-    } catch (e) {
-        if (e.message && (e.message.includes("key") || e.message.includes("decrypt") || e.message.includes("Invalid"))) {
-            errEl.textContent = "Invalid key. Use the key you received when you protected this file.";
-        } else {
-            errEl.textContent = "Decryption failed.";
+            try {
+                await fetch(`${API_BASE}/api/files/${encodeURIComponent(_decryptFileId)}`, { method: "DELETE", headers: authHeaders() });
+            } catch (e) { }
+
+            hideDecryptModal();
+            showStatus(shouldOpen ? "File decrypted and opened. Removed from cloud." : "File decrypted and downloaded. Removed from cloud.");
+            loadMyFiles();
+        } catch (e) {
+            if (e.message && (e.message.includes("key") || e.message.includes("decrypt") || e.message.includes("Invalid"))) {
+                errEl.textContent = "Invalid key. Use the key you received when you protected this file.";
+            } else {
+                errEl.textContent = "Decryption failed.";
+            }
+        } finally {
+            confirmBtn.disabled = false;
+            confirmBtn.textContent = "Decrypt & open";
         }
-    } finally {
-        confirmBtn.disabled = false;
-        confirmBtn.textContent = "Decrypt & open";
-    }
-});
+    });
 }
 
 async function downloadFile(id, name, isEncrypted) {
@@ -669,10 +732,10 @@ async function downloadFile(id, name, isEncrypted) {
         a.click();
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        
+
         try {
             await fetch(`${API_BASE}/api/files/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
-        } catch (e) {}
+        } catch (e) { }
 
         showStatus("File downloaded and removed from cloud.");
         loadMyFiles();
@@ -728,42 +791,42 @@ if (deleteKeyToggleEl) {
 const deleteModalConfirmEl = document.getElementById("deleteModalConfirm");
 if (deleteModalConfirmEl) {
     deleteModalConfirmEl.addEventListener("click", async () => {
-    const keyInput = document.getElementById("deleteKeyInput");
-    const keyStr = normalizeKey(keyInput.value || "");
-    const errEl = document.getElementById("deleteModalError");
-    if (!_deleteFileId) return;
-    const { id, isEncrypted } = _deleteFileId;
-    if (isEncrypted) {
-        if (!keyStr) {
-            errEl.textContent = "Please enter the file's decryption key (special key) to confirm deletion.";
-            return;
-        }
-        errEl.textContent = "";
-        try {
-            const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(id)}`, { headers: authHeaders() });
-            if (!res.ok) throw new Error("Could not load file");
-            const blob = await res.blob();
-            const buf = await blob.arrayBuffer();
-            await decryptFile(buf, keyStr);
-        } catch (e) {
-            if (e.message && (e.message.includes("key") || e.message.includes("decrypt") || e.message.includes("Invalid"))) {
-                errEl.textContent = "Invalid key. Enter the correct decryption key for this file.";
-            } else {
-                errEl.textContent = "Invalid key. Cannot delete without the correct special key.";
+        const keyInput = document.getElementById("deleteKeyInput");
+        const keyStr = normalizeKey(keyInput.value || "");
+        const errEl = document.getElementById("deleteModalError");
+        if (!_deleteFileId) return;
+        const { id, isEncrypted } = _deleteFileId;
+        if (isEncrypted) {
+            if (!keyStr) {
+                errEl.textContent = "Please enter the file's decryption key (special key) to confirm deletion.";
+                return;
             }
-            return;
+            errEl.textContent = "";
+            try {
+                const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(id)}`, { headers: authHeaders() });
+                if (!res.ok) throw new Error("Could not load file");
+                const blob = await res.blob();
+                const buf = await blob.arrayBuffer();
+                await decryptFile(buf, keyStr);
+            } catch (e) {
+                if (e.message && (e.message.includes("key") || e.message.includes("decrypt") || e.message.includes("Invalid"))) {
+                    errEl.textContent = "Invalid key. Enter the correct decryption key for this file.";
+                } else {
+                    errEl.textContent = "Invalid key. Cannot delete without the correct special key.";
+                }
+                return;
+            }
         }
-    }
-    try {
-        const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
-        if (!res.ok) throw new Error("Delete failed");
-        hideDeleteModal();
-        loadMyFiles();
-        showStatus("File deleted");
-    } catch {
-        errEl.textContent = errEl.textContent || "Delete failed.";
-    }
-});
+        try {
+            const res = await fetch(`${API_BASE}/api/files/${encodeURIComponent(id)}`, { method: "DELETE", headers: authHeaders() });
+            if (!res.ok) throw new Error("Delete failed");
+            hideDeleteModal();
+            loadMyFiles();
+            showStatus("File deleted");
+        } catch {
+            errEl.textContent = errEl.textContent || "Delete failed.";
+        }
+    });
 }
 
 async function deleteFile(id, isEncrypted) {
@@ -842,56 +905,59 @@ if (keyToggle) {
 const encryptBtnEl = document.getElementById("encryptBtn");
 if (encryptBtnEl) {
     encryptBtnEl.onclick = async () => {
-    const file = fileInput.files[0];
-    if (!file) {
-        showStatus("Select a file first.");
-        return;
-    }
-    const keyStr = normalizeKey(encryptionKey.value || "");
-    if (!keyStr) {
-        showStatus("Generate an encryption key, then try again.");
-        return;
-    }
-    const btn = document.getElementById("encryptBtn");
-    const origText = btn.textContent;
-    btn.disabled = true;
-    btn.textContent = "Encrypting…";
-    showStatus("Encrypting in browser…");
-    try {
-        const expiryEl = document.getElementById("fileExpiry");
-        const expiryVal = expiryEl ? expiryEl.value : "never";
-        const buf = await file.arrayBuffer();
-        const encryptedBuf = await encryptFile(buf);
-        const blob = new Blob([encryptedBuf]);
-        const form = new FormData();
-        form.append("file", blob, file.name);
-        form.append("originalName", file.name);
-        form.append("encrypted", "true");
-        form.append("expiry", expiryVal);
-        showStatus("Uploading…");
-        const res = await fetch(`${API_BASE || ""}/api/files`, {
-            method: "POST",
-            headers: authHeaders(),
-            body: form,
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            showStatus(data.error || `Upload failed (${res.status})`);
-            btn.disabled = false;
-            btn.textContent = origText;
+        const file = fileInput.files[0];
+        if (!file) {
+            showStatus("Select a file first.");
             return;
         }
-        showStatus("File protected. Stored encrypted in cloud — only your key can decrypt it.");
-        fileInput.value = "";
-        fileInfo.style.display = "none";
-        encryptionKey.value = "";
-        if (expiryEl) expiryEl.value = "never";
-        await loadMyFiles();
-    } catch (e) {
-        showStatus("Upload failed: " + (e.message || "Check your connection. On mobile, use the tunnel URL."));
-    }
-    btn.disabled = false;
-    btn.textContent = origText;
+        const keyStr = normalizeKey(encryptionKey.value || "");
+        if (!keyStr) {
+            showStatus("Generate an encryption key, then try again.");
+            return;
+        }
+        const btn = document.getElementById("encryptBtn");
+        const origText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = "Encrypting…";
+        showStatus("Encrypting in browser…");
+        try {
+            const expiryEl = document.getElementById("fileExpiry");
+            const expiryVal = expiryEl ? expiryEl.value : "never";
+            const buf = await file.arrayBuffer();
+            const encryptedBuf = await encryptFile(buf);
+            const blob = new Blob([encryptedBuf]);
+            const form = new FormData();
+            form.append("file", blob, file.name);
+            form.append("originalName", file.name);
+            form.append("encrypted", "true");
+            form.append("expiry", expiryVal);
+            showStatus("Uploading…");
+            const res = await fetch(`${API_BASE || ""}/api/files`, {
+                method: "POST",
+                headers: authHeaders(),
+                body: form,
+            });
+            const data = await res.json().catch(async () => {
+                const text = await res.text().catch(() => "");
+                return { error: text || `Upload failed (${res.status})` };
+            });
+            if (!res.ok) {
+                showStatus(data.error || `Upload failed (${res.status})`);
+                btn.disabled = false;
+                btn.textContent = origText;
+                return;
+            }
+            showStatus("File protected. Stored encrypted in cloud — only your key can decrypt it.");
+            fileInput.value = "";
+            fileInfo.style.display = "none";
+            encryptionKey.value = "";
+            if (expiryEl) expiryEl.value = "never";
+            await loadMyFiles();
+        } catch (e) {
+            showStatus("Upload failed: " + (e.message || "Check your connection. On mobile, use the tunnel URL."));
+        }
+        btn.disabled = false;
+        btn.textContent = origText;
     };
 }
 
@@ -1075,22 +1141,35 @@ setupPasswordToggle("regConfirmPassword", "regConfirmPasswordToggle");
         return;
     }
 
-    // Check for valid stored JWT session
-    const token = getToken();
-    if (token) {
-        try {
-            const res = await fetch(`${API_BASE}/api/me`, { headers: authHeaders() });
-            if (res.ok) {
-                const data = await res.json();
-                if (data && data.email) {
-                    showLoggedIn(data.email);
-                    return;
-                }
-            }
-        } catch (_) {}
-    }
-
-    // Default to Login overlay
-    setToken(null);
-    if (loginOverlay) loginOverlay.style.display = "flex";
+    await restoreAuthSession();
 })();
+// Keep the background fixed while any overlay is active.
+function updateBodyScrollLock() {
+    const overlays = document.querySelectorAll(".login-overlay, .modal-overlay");
+    const hasVisibleOverlay = Array.from(overlays).some((overlay) => {
+        if (!overlay || !overlay.isConnected) return false;
+        const style = window.getComputedStyle(overlay);
+        return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+    });
+
+    document.body.classList.toggle("modal-open", hasVisibleOverlay);
+    document.documentElement.classList.toggle("modal-open", hasVisibleOverlay);
+}
+
+const scrollLockObserver = new MutationObserver(updateBodyScrollLock);
+
+if (loginOverlay) {
+    scrollLockObserver.observe(loginOverlay, {
+        attributes: true,
+        attributeFilter: ["class", "style"]
+    });
+}
+
+document.querySelectorAll(".modal-overlay").forEach((overlay) => {
+    scrollLockObserver.observe(overlay, {
+        attributes: true,
+        attributeFilter: ["class", "style"]
+    });
+});
+
+updateBodyScrollLock();

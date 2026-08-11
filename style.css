@@ -50,31 +50,52 @@ body {
     pointer-events: none;
     position: fixed;
     inset: 0;
-    background: repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 2px,
-        rgba(0, 0, 0, 0.03) 2px,
-        rgba(0, 0, 0, 0.03) 4px
-    );
+    background: repeating-linear-gradient(0deg,
+            transparent,
+            transparent 2px,
+            rgba(0, 0, 0, 0.03) 2px,
+            rgba(0, 0, 0, 0.03) 4px);
     z-index: 9999;
     opacity: 0.5;
 }
 
 /* Show reset/verify form immediately when URL has token (before JS loads) */
-.early-reset #registerForm,.early-reset #registerSwitch,.early-reset #loginForm,.early-reset #loginSwitch,
-.early-reset #forgotForm,.early-reset #forgotSwitch,.early-reset #resetSwitch,.early-reset #verifyEmailPanel { display: none !important; }
-.early-reset #resetForm { display: block !important; }
-.early-verify #registerForm,.early-verify #registerSwitch,.early-verify #loginForm,.early-verify #loginSwitch,
-.early-verify #forgotForm,.early-verify #forgotSwitch,.early-verify #resetForm,.early-verify #resetSwitch { display: none !important; }
-.early-verify #verifyEmailPanel { display: block !important; }
+.early-reset #registerForm,
+.early-reset #registerSwitch,
+.early-reset #loginForm,
+.early-reset #loginSwitch,
+.early-reset #forgotForm,
+.early-reset #forgotSwitch,
+.early-reset #resetSwitch,
+.early-reset #verifyEmailPanel {
+    display: none !important;
+}
+
+.early-reset #resetForm {
+    display: block !important;
+}
+
+.early-verify #registerForm,
+.early-verify #registerSwitch,
+.early-verify #loginForm,
+.early-verify #loginSwitch,
+.early-verify #forgotForm,
+.early-verify #forgotSwitch,
+.early-verify #resetForm,
+.early-verify #resetSwitch {
+    display: none !important;
+}
+
+.early-verify #verifyEmailPanel {
+    display: block !important;
+}
 
 /* ---------- Login ---------- */
 .login-overlay {
     position: fixed;
     inset: 0;
     background: var(--bg-deep);
-    display: flex;
+    display: none;
     align-items: center;
     justify-content: center;
     z-index: 1000;
@@ -875,8 +896,15 @@ body {
 }
 
 @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
 }
 
 /* Modals */
@@ -1004,12 +1032,16 @@ body {
 
 /* Touch-friendly (mobile) */
 @media (hover: none) and (pointer: coarse) {
-    .login-btn, .btn {
+
+    .login-btn,
+    .btn {
         min-height: 44px;
         -webkit-tap-highlight-color: transparent;
     }
 
-    .link-btn, .tab, .file-actions .btn {
+    .link-btn,
+    .tab,
+    .file-actions .btn {
         min-height: 44px;
         padding: 0.5rem 1rem;
         -webkit-tap-highlight-color: transparent;
@@ -1021,7 +1053,8 @@ body {
     }
 
     .form-group input {
-        font-size: 16px; /* Prevents zoom on focus (iOS) */
+        font-size: 16px;
+        /* Prevents zoom on focus (iOS) */
     }
 }
 
@@ -1068,5 +1101,174 @@ body {
     .modal {
         margin: 1rem;
         max-height: calc(100vh - 2rem);
+    }
+}
+
+@media (max-width: 640px) {
+
+    html,
+    body {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden;
+        margin: 0;
+        padding: 0;
+    }
+
+    body.modal-open {
+        overflow: hidden !important;
+        height: 100vh !important;
+    }
+
+    .main-container {
+        padding: 1rem;
+    }
+
+    .header {
+        min-height: 64px;
+        height: auto;
+        padding: 0.75rem 0.85rem;
+    }
+
+    .header-right {
+        gap: 0.5rem;
+    }
+
+    .user-info {
+        max-width: 100%;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .user-email {
+        max-width: 110px;
+        font-size: 0.75rem;
+    }
+
+    .logout-btn {
+        white-space: nowrap;
+        padding: 0.45rem 0.7rem;
+    }
+
+    .dashboard-hero h1 {
+        font-size: 1.5rem;
+    }
+
+    .tabs {
+        gap: 0.35rem;
+    }
+
+    .tab {
+        flex: 1 1 auto;
+        padding: 0.7rem 0.75rem;
+    }
+
+    .panel-card {
+        padding: 1rem;
+    }
+
+    .upload-zone {
+        padding: 1.25rem 1rem;
+    }
+
+    .key-row,
+    .decrypt-key-row {
+        display: grid;
+        grid-template-columns: 1fr auto auto;
+        gap: 0.5rem;
+    }
+
+    .key-row .key-input,
+    .decrypt-key-row .key-input {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .login-overlay,
+    .modal-overlay {
+        padding: 0.75rem;
+    }
+
+    .login-card,
+    .modal {
+        width: min(100%, 420px);
+        max-width: 100%;
+        max-height: calc(100dvh - 1.5rem);
+        margin: 0 auto;
+        overflow-y: auto;
+    }
+
+    .login-card {
+        padding: 1.25rem 1rem;
+    }
+
+    #loginForm,
+    #registerForm,
+    .login-card {
+        width: min(100%, 420px);
+        max-width: 100%;
+    }
+
+    .form-group input,
+    .key-input,
+    .expiry-select,
+    .status-bar,
+    .btn,
+    .login-btn,
+    .btn-icon,
+    select,
+    textarea,
+    input {
+        max-width: 100%;
+        width: 100%;
+    }
+
+    .key-row .btn,
+    .key-row .btn-icon,
+    .decrypt-key-row .btn,
+    .decrypt-key-row .btn-icon,
+    .modal-actions .btn {
+        width: auto;
+    }
+
+    .file-actions {
+        width: 100%;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+    }
+
+    .files-list li {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .modal-actions {
+        flex-wrap: wrap;
+        justify-content: stretch;
+    }
+
+    .modal-actions .btn {
+        flex: 1 1 140px;
+    }
+
+    .status-bar {
+        white-space: normal;
+        word-break: break-word;
+    }
+
+    #loginOverlay {
+        position: fixed !important;
+        inset: 0 !important;
+        width: 100vw !important;
+        height: 100dvh !important;
+        min-height: 100dvh !important;
+        overflow-y: auto !important;
+        overflow-x: hidden !important;
+        overscroll-behavior: contain !important;
+        z-index: 99999 !important;
+    }
+
+    #loginOverlay>* {
+        max-width: 100% !important;
     }
 }

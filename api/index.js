@@ -17,7 +17,7 @@ try {
   const blobSdk = require('@vercel/blob');
   putBlob = blobSdk.put;
   delBlob = blobSdk.del;
-} catch (_) {}
+} catch (_) { }
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -27,6 +27,8 @@ const DATA_DIR = IS_VERCEL ? '/tmp' : __dirname;
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const FILES_FILE = path.join(DATA_DIR, 'files.json');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
+const MONGO_REQUIRED_IN_PRODUCTION = IS_VERCEL && !process.env.MONGODB_URI;
+const BLOB_REQUIRED_IN_PRODUCTION = IS_VERCEL && !process.env.BLOB_READ_WRITE_TOKEN;
 const LOG_FILE = path.join(DATA_DIR, 'audit.log');
 const RESET_EMAIL_FROM = process.env.RESET_EMAIL_FROM || 'no-reply@example.com';
 const RESET_EMAIL_USER = process.env.RESET_EMAIL_USER || 'your-email@example.com';
@@ -43,6 +45,16 @@ const RESET_EMAIL_TRANSPORT = {
 const RESET_LINKS_FILE = path.join(DATA_DIR, 'reset-links.json');
 const PENDING_REGISTRATIONS_FILE = path.join(DATA_DIR, 'pending-registrations.json');
 const TUNNEL_URL_FILE = path.join(DATA_DIR, '.tunnel-url');
+
+function sanitizeErrorMessage(msg) {
+  if (!msg) return 'Unknown error';
+  const str = String(msg);
+  return str
+    .replace(/vercel_blob_rw_[a-zA-Z0-9_-]+/gi, '[REDACTED_BLOB_TOKEN]')
+    .replace(/mongodb(?:\+srv)?:\/\/[^\s]+/gi, '[REDACTED_MONGO_URI]')
+    .replace(/Bearer\s+[a-zA-Z0-9._-]+/gi, '[REDACTED_TOKEN]')
+    .substring(0, 250);
+}
 
 // --- MongoDB Atlas Setup ---
 let isMongoConnected = false;
@@ -87,12 +99,28 @@ function getPublicBaseUrl(req) {
       const tunnel = fs.readFileSync(TUNNEL_URL_FILE, 'utf8').trim();
       if (tunnel && (tunnel.startsWith('http://') || tunnel.startsWith('https://'))) return tunnel;
     }
-  } catch (_) {}
+  } catch (_) { }
   const reqHost = req.get('host') || '';
   const isLocalhost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(reqHost);
   const reqOrigin = `${req.protocol}://${reqHost}`;
   if (!isLocalhost) return reqOrigin;
   return process.env.APP_BASE_URL || reqOrigin;
+}
+
+function throwIfProductionStorageMissing() {
+  if (IS_VERCEL && !process.env.MONGODB_URI) {
+    const err = new Error('Missing MONGODB_URI for production user persistence');
+    err.statusCode = 503;
+    throw err;
+  }
+}
+
+function throwIfProductionBlobMissing() {
+  if (IS_VERCEL && !process.env.BLOB_READ_WRITE_TOKEN) {
+    const err = new Error('Missing BLOB_READ_WRITE_TOKEN for production file storage');
+    err.statusCode = 503;
+    throw err;
+  }
 }
 
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
@@ -102,7 +130,7 @@ function audit(action, username, details = '') {
   const line = `[${new Date().toISOString()}] ${action} | user: ${username || '-'} | ${details}\n`;
   try {
     fs.appendFileSync(LOG_FILE, line);
-  } catch (_) {}
+  } catch (_) { }
 }
 
 let resetEmailTransporter = null;
@@ -148,6 +176,7 @@ app.use((req, res, next) => {
 
 // --- Data Layer Helpers ---
 async function getUsers() {
+  if (IS_VERCEL && !MONGODB_URI) return [];
   if (isMongoConnected) {
     const docs = await UserModel.find({}).lean();
     return docs.map((d) => ({ ...d, id: d._id.toString() }));
@@ -162,6 +191,7 @@ async function getUsers() {
 
 async function findUserByEmail(email) {
   const norm = (e) => (e || '').toLowerCase().trim();
+  if (IS_VERCEL && !MONGODB_URI) return null;
   if (isMongoConnected) {
     const doc = await UserModel.findOne({ email: norm(email) }).lean();
     return doc ? { ...doc, id: doc._id.toString() } : null;
@@ -171,6 +201,9 @@ async function findUserByEmail(email) {
 }
 
 async function saveUser(userObj) {
+  if (IS_VERCEL && !MONGODB_URI) {
+    throw new Error('Missing MONGODB_URI for production user persistence');
+  }
   if (isMongoConnected) {
     await UserModel.updateOne(
       { email: userObj.email.toLowerCase().trim() },
@@ -178,6 +211,9 @@ async function saveUser(userObj) {
       { upsert: true }
     );
     return;
+  }
+  if (IS_VERCEL) {
+    throw new Error('Persistent user storage is not configured for this deployment');
   }
   const users = await getUsers();
   const idx = users.findIndex((u) => (u.email || '').toLowerCase().trim() === userObj.email.toLowerCase().trim());
@@ -187,6 +223,7 @@ async function saveUser(userObj) {
 }
 
 async function getFiles() {
+  if (IS_VERCEL && !MONGODB_URI) return [];
   if (isMongoConnected) {
     const docs = await FileModel.find({}).lean();
     return docs.map((d) => ({ ...d, id: d.id || d._id.toString() }));
@@ -200,6 +237,9 @@ async function getFiles() {
 }
 
 async function saveFileEntry(entry) {
+  if (IS_VERCEL && !MONGODB_URI) {
+    throw new Error('Missing MONGODB_URI for production metadata persistence');
+  }
   if (isMongoConnected) {
     await FileModel.updateOne(
       { id: entry.id },
@@ -207,6 +247,9 @@ async function saveFileEntry(entry) {
       { upsert: true }
     );
     return;
+  }
+  if (IS_VERCEL) {
+    throw new Error('Persistent file metadata storage is not configured for this deployment');
   }
   const files = await getFiles();
   files.push(entry);
@@ -237,12 +280,12 @@ async function cleanupExpiredFiles() {
           if (f.blobUrl && delBlob && process.env.BLOB_READ_WRITE_TOKEN) {
             try {
               await delBlob(f.blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
-            } catch (_) {}
+            } catch (_) { }
           }
           if (f.storedName) {
             const filePath = path.join(UPLOAD_DIR, f.storedName);
             if (fs.existsSync(filePath)) {
-              try { fs.unlinkSync(filePath); } catch (_) {}
+              try { fs.unlinkSync(filePath); } catch (_) { }
             }
           }
           await deleteFileEntry(f.id);
@@ -269,7 +312,7 @@ function authMiddleware(req, res, next) {
         req.user = { email: String(decoded.email).trim().toLowerCase() };
         return next();
       }
-    } catch (_) {}
+    } catch (_) { }
   }
   return res.status(401).json({ error: 'Unauthorized. Please log in.' });
 }
@@ -291,6 +334,10 @@ app.post('/api/login', async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password required' });
+  }
+  if (IS_VERCEL && !MONGODB_URI) {
+    audit('LOGIN_FAIL', String(email).trim(), 'MONGODB_URI missing in production');
+    return res.status(503).json({ error: 'Authentication storage is not configured. Missing MONGODB_URI.' });
   }
   const user = await findUserByEmail(email.trim());
   if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
@@ -324,6 +371,10 @@ app.post('/api/register', async (req, res) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
     return res.status(400).json({ error: 'Invalid email format' });
   }
+  if (IS_VERCEL && !MONGODB_URI) {
+    audit('REGISTER_FAIL', trimmed, 'MONGODB_URI missing in production');
+    return res.status(503).json({ error: 'User database is not configured. Missing MONGODB_URI.' });
+  }
   const existingUser = await findUserByEmail(trimmed);
   if (existingUser) {
     return res.status(409).json({ error: 'An account with this email already exists' });
@@ -336,7 +387,12 @@ app.post('/api/register', async (req, res) => {
     verified: true,
     createdAt: new Date().toISOString(),
   };
-  await saveUser(newUser);
+  try {
+    await saveUser(newUser);
+  } catch (err) {
+    console.error('[Register] Save failed:', err.message);
+    return res.status(503).json({ error: err.message || 'User database is not configured.' });
+  }
   audit('REGISTER', trimmed, 'account created');
   res.status(201).json({ email: trimmed, message: 'Account created successfully. You can now log in.' });
 });
@@ -356,7 +412,22 @@ app.post('/api/logout', authMiddleware, (req, res) => {
 
 // POST /api/files — upload encrypted payload
 app.post('/api/files', authMiddleware, upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  console.log(`[Upload Diagnostic] Method: ${req.method} | Content-Type: ${req.headers['content-type'] || 'none'}`);
+  console.log(`[Upload Diagnostic] User: ${req.user ? req.user.email : 'unauthenticated'} | File Attached: ${!!req.file}`);
+  
+  if (!req.file) {
+    console.error('[Upload Diagnostic] Upload failed: No file attached to request');
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  console.log(`[Upload Diagnostic] File OriginalName: ${req.file.originalname} | Size: ${req.file.size} bytes | Buffer Length: ${req.file.buffer ? req.file.buffer.length : 0}`);
+  console.log(`[Upload Diagnostic] IS_VERCEL: ${!!IS_VERCEL} | BLOB_READ_WRITE_TOKEN present: ${!!process.env.BLOB_READ_WRITE_TOKEN} | putBlob SDK ready: ${!!putBlob}`);
+
+  if (IS_VERCEL && !process.env.BLOB_READ_WRITE_TOKEN) {
+    console.error('[Upload Diagnostic] Vercel Blob token missing in environment variables');
+    return res.status(503).json({ error: 'Blob storage is not configured. Missing BLOB_READ_WRITE_TOKEN in Vercel.' });
+  }
+
   const originalName = (req.body && req.body.originalName) || req.file.originalname || 'file';
   const encrypted = (req.body && req.body.encrypted) === 'true';
 
@@ -382,20 +453,28 @@ app.post('/api/files', authMiddleware, upload.single('file'), async (req, res) =
   // Upload to Vercel Blob Storage if BLOB_READ_WRITE_TOKEN is set
   if (putBlob && process.env.BLOB_READ_WRITE_TOKEN) {
     try {
+      const blobToken = String(process.env.BLOB_READ_WRITE_TOKEN).trim();
+      console.log(`[Upload Diagnostic] Initiating Vercel Blob upload for fileId: ${fileId}...`);
       const blob = await putBlob(`uploads/${fileId}`, req.file.buffer, {
         access: 'public',
         addRandomSuffix: false,
-        token: process.env.BLOB_READ_WRITE_TOKEN
+        token: blobToken,
       });
       blobUrl = blob.url;
+      console.log(`[Upload Diagnostic] Vercel Blob upload SUCCESS.`);
     } catch (blobErr) {
-      console.error('[VercelBlob] Upload error:', blobErr.message);
-      return res.status(500).json({ error: 'Cloud storage upload failed' });
+      const safeErr = sanitizeErrorMessage(blobErr.message || String(blobErr));
+      console.error('[Upload Diagnostic] Vercel Blob upload EXCEPTION:', safeErr);
+      return res.status(500).json({ error: `Cloud storage upload failed: ${safeErr}` });
     }
+  } else if (IS_VERCEL) {
+    console.error('[Upload Diagnostic] BLOB_READ_WRITE_TOKEN missing in Vercel runtime environment');
+    return res.status(503).json({ error: 'Cloud storage is not configured. Missing BLOB_READ_WRITE_TOKEN environment variable in Vercel.' });
   } else {
     // Local disk fallback
     const filePath = path.join(UPLOAD_DIR, fileId);
     fs.writeFileSync(filePath, req.file.buffer);
+    console.log('[Upload Diagnostic] Local disk fallback upload SUCCESS');
   }
 
   const entry = {
@@ -411,7 +490,18 @@ app.post('/api/files', authMiddleware, upload.single('file'), async (req, res) =
     expiresAt: expiresAt,
   };
 
-  await saveFileEntry(entry);
+  try {
+    await saveFileEntry(entry);
+  } catch (err) {
+    console.error('[Upload] Metadata save failed:', err);
+    if (blobUrl && delBlob && process.env.BLOB_READ_WRITE_TOKEN) {
+      try {
+        await delBlob(blobUrl, { token: String(process.env.BLOB_READ_WRITE_TOKEN).trim() });
+      } catch (_) {}
+    }
+    const safeDbErr = sanitizeErrorMessage(err.message || String(err));
+    return res.status(500).json({ error: `Failed to save file metadata: ${safeDbErr}` });
+  }
   audit('UPLOAD', req.user.email, `file: ${entry.originalName} id: ${entry.id} expiresAt: ${expiresAt || 'never'}`);
   res.status(201).json(entry);
 });
@@ -440,7 +530,7 @@ app.get('/api/files/:id', async (req, res) => {
       if (decoded && decoded.email) {
         reqUserEmail = String(decoded.email).trim().toLowerCase();
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   const entry = files.find((f) => f.id === req.params.id && (isShareDownload || (reqUserEmail && (f.email || f.username) === reqUserEmail)));
@@ -488,12 +578,12 @@ app.delete('/api/files/:id', authMiddleware, async (req, res) => {
   if (entry.blobUrl && delBlob && process.env.BLOB_READ_WRITE_TOKEN) {
     try {
       await delBlob(entry.blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
-    } catch (_) {}
+    } catch (_) { }
   }
   if (entry.storedName) {
     const filePath = path.join(UPLOAD_DIR, entry.storedName);
     if (fs.existsSync(filePath)) {
-      try { fs.unlinkSync(filePath); } catch (_) {}
+      try { fs.unlinkSync(filePath); } catch (_) { }
     }
   }
 
@@ -526,7 +616,7 @@ function getLocalIP() {
 }
 
 if (!IS_VERCEL) {
-  app.listen(PORT, () => {
+  app.listen(PORT, "0.0.0.0", () => {
     console.log(`SecureCloud API running at http://localhost:${PORT}`);
     const ip = getLocalIP();
     if (ip) {
