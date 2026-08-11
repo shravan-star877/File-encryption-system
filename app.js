@@ -61,6 +61,7 @@ function showLoginScreen() {
     if (userInfo) userInfo.style.display = "none";
     if (userDisplay) userDisplay.textContent = "";
     if (userAvatar) userAvatar.textContent = "?";
+    updateBodyScrollLock(true);
 }
 
 function showLoggedIn(email) {
@@ -75,6 +76,7 @@ function showLoggedIn(email) {
     if (userDisplay) userDisplay.textContent = email;
     if (userAvatar) userAvatar.textContent = (email[0] || "?").toUpperCase();
     localStorage.setItem("securecloud_user", email);
+    updateBodyScrollLock(false);
     loadMyFiles();
 }
 
@@ -107,6 +109,11 @@ async function restoreAuthSession() {
         if (!res.ok) {
             clearAuthState();
             showLoginScreen();
+            if (res.status === 401) {
+                const data = await res.json().catch(() => ({}));
+                const loginError = document.getElementById("loginError");
+                if (loginError && data.error) loginError.textContent = data.error;
+            }
             return;
         }
 
@@ -1144,17 +1151,47 @@ setupPasswordToggle("regConfirmPassword", "regConfirmPasswordToggle");
     await restoreAuthSession();
 })();
 // Keep the background fixed while any overlay is active.
-function updateBodyScrollLock() {
-    const overlays = document.querySelectorAll(".login-overlay, .modal-overlay");
-    const hasVisibleOverlay = Array.from(overlays).some((overlay) => {
-        if (!overlay || !overlay.isConnected) return false;
-        const style = window.getComputedStyle(overlay);
-        return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
-    });
+let _scrollLockY = 0;
 
-    document.body.classList.toggle("modal-open", hasVisibleOverlay);
-    document.documentElement.classList.toggle("modal-open", hasVisibleOverlay);
+function updateBodyScrollLock(forceLock) {
+    const overlays = document.querySelectorAll(".login-overlay, .modal-overlay");
+    const hasVisibleOverlay = forceLock === true
+        ? true
+        : forceLock === false
+            ? false
+            : Array.from(overlays).some((overlay) => {
+                if (!overlay || !overlay.isConnected) return false;
+                const style = window.getComputedStyle(overlay);
+                return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+            });
+
+    if (hasVisibleOverlay) {
+        if (!document.body.classList.contains("modal-open")) {
+            _scrollLockY = window.scrollY || document.documentElement.scrollTop || 0;
+            document.body.style.top = `-${_scrollLockY}px`;
+            document.body.style.width = "100%";
+        }
+        document.body.classList.add("modal-open");
+        document.documentElement.classList.add("modal-open");
+        return;
+    }
+
+    document.body.classList.remove("modal-open");
+    document.documentElement.classList.remove("modal-open");
+    document.body.style.top = "";
+    document.body.style.width = "";
+    window.scrollTo(0, _scrollLockY);
 }
+
+document.addEventListener("touchmove", (e) => {
+    if (!document.body.classList.contains("modal-open")) return;
+    const loginVisible = loginOverlay && loginOverlay.style.display === "flex";
+    if (!loginVisible) return;
+    const scrollable = e.target.closest(".login-card, .modal");
+    if (!scrollable) {
+        e.preventDefault();
+    }
+}, { passive: false });
 
 const scrollLockObserver = new MutationObserver(updateBodyScrollLock);
 

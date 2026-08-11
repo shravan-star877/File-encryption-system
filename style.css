@@ -96,9 +96,12 @@ body {
     inset: 0;
     background: var(--bg-deep);
     display: none;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: 10000;
+    overflow: hidden;
+    overscroll-behavior: contain;
 }
 
 .login-card {
@@ -1115,9 +1118,27 @@ body {
         padding: 0;
     }
 
+    html.modal-open,
     body.modal-open {
         overflow: hidden !important;
-        height: 100vh !important;
+        position: fixed !important;
+        width: 100% !important;
+        height: 100% !important;
+        max-height: 100dvh !important;
+        overscroll-behavior: none !important;
+        touch-action: none !important;
+    }
+
+    body.modal-open .header,
+    body.modal-open .main-container,
+    body.modal-open .scanline {
+        visibility: hidden !important;
+        pointer-events: none !important;
+    }
+
+    body.modal-open .login-overlay {
+        visibility: visible !important;
+        pointer-events: auto !important;
     }
 
     .main-container {
@@ -1259,13 +1280,33 @@ body {
     #loginOverlay {
         position: fixed !important;
         inset: 0 !important;
-        width: 100vw !important;
+        width: 100% !important;
         height: 100dvh !important;
         min-height: 100dvh !important;
+        max-height: 100dvh !important;
+        overflow: hidden !important;
+        overflow-x: hidden !important;
+        overscroll-behavior: none !important;
+        z-index: 99999 !important;
+        background: var(--bg-deep) !important;
+        display: none;
+        flex-direction: column !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 0.75rem !important;
+    }
+
+    #loginOverlay[style*="flex"] {
+        display: flex !important;
+    }
+
+    #loginOverlay .login-card {
         overflow-y: auto !important;
         overflow-x: hidden !important;
         overscroll-behavior: contain !important;
-        z-index: 99999 !important;
+        -webkit-overflow-scrolling: touch;
+        max-height: calc(100dvh - 1.5rem) !important;
+        width: min(100%, 420px) !important;
     }
 
     #loginOverlay>* {

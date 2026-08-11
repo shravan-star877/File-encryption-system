@@ -22,7 +22,7 @@ try {
 const app = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'securecloud-secret-change-in-production';
-const IS_VERCEL = process.env.VERCEL || process.env.NODE_ENV === 'production';
+const IS_VERCEL = !!process.env.VERCEL;
 const DATA_DIR = IS_VERCEL ? '/tmp' : __dirname;
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const FILES_FILE = path.join(DATA_DIR, 'files.json');
@@ -56,19 +56,53 @@ function sanitizeErrorMessage(msg) {
     .substring(0, 250);
 }
 
-// --- MongoDB Atlas Setup ---
+// --- MongoDB Atlas Setup (cached connection for serverless) ---
 let isMongoConnected = false;
 const MONGODB_URI = process.env.MONGODB_URI;
 
-if (MONGODB_URI) {
-  mongoose.connect(MONGODB_URI)
-    .then(() => {
+async function ensureMongoReady() {
+  if (!MONGODB_URI) {
+    if (IS_VERCEL) {
+      const err = new Error('Missing MONGODB_URI for production persistence');
+      err.code = 'MONGO_NOT_CONFIGURED';
+      throw err;
+    }
+    return false;
+  }
+
+  if (mongoose.connection.readyState === 1) {
+    isMongoConnected = true;
+    return true;
+  }
+
+  if (!global.__secureCloudMongoPromise) {
+    global.__secureCloudMongoPromise = mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+    }).then(() => {
       isMongoConnected = true;
-      console.log('[Database] Successfully connected to MongoDB Atlas');
-    })
-    .catch((err) => {
-      console.error('[Database] MongoDB Atlas connection error:', err.message);
+      console.log('[Database] Connected to MongoDB (database:', mongoose.connection.name + ', collection: users/files)');
+      return true;
+    }).catch((err) => {
+      global.__secureCloudMongoPromise = null;
+      isMongoConnected = false;
+      console.error('[Database] MongoDB connection error:', err.message);
+      throw err;
     });
+  }
+
+  await global.__secureCloudMongoPromise;
+  return mongoose.connection.readyState === 1;
+}
+
+function useMongoStorage() {
+  return !!MONGODB_URI;
+}
+
+function mongoErrorResponse(err) {
+  if (err && err.code === 'MONGO_NOT_CONFIGURED') {
+    return { status: 503, error: 'Database is not configured. Missing MONGODB_URI.' };
+  }
+  return { status: 503, error: `Database connection failed. ${sanitizeErrorMessage(err && err.message)}` };
 }
 
 const UserSchema = new mongoose.Schema({
@@ -163,8 +197,11 @@ function getResetEmailTransporter(callback) {
     .catch((err) => callback(err, null));
 }
 
-// Multer memory storage when using Vercel Blob or buffer mode, otherwise disk storage
-const upload = multer({ storage: multer.memoryStorage() });
+// Multer memory storage — 4MB limit safe for Vercel serverless body limit
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 4 * 1024 * 1024 },
+});
 
 app.set('trust proxy', 1);
 app.use(cors({ origin: true, credentials: true }));
@@ -175,93 +212,108 @@ app.use((req, res, next) => {
 });
 
 // --- Data Layer Helpers ---
-async function getUsers() {
-  if (IS_VERCEL && !MONGODB_URI) return [];
-  if (isMongoConnected) {
-    const docs = await UserModel.find({}).lean();
-    return docs.map((d) => ({ ...d, id: d._id.toString() }));
-  }
-  if (!fs.existsSync(USERS_FILE)) return [];
+function readLocalJson(filePath) {
+  if (!fs.existsSync(filePath)) return [];
   try {
-    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
   } catch (_) {
     return [];
   }
 }
 
 async function findUserByEmail(email) {
-  const norm = (e) => (e || '').toLowerCase().trim();
-  if (IS_VERCEL && !MONGODB_URI) return null;
-  if (isMongoConnected) {
-    const doc = await UserModel.findOne({ email: norm(email) }).lean();
+  const normalized = (email || '').toLowerCase().trim();
+  if (useMongoStorage()) {
+    await ensureMongoReady();
+    const doc = await UserModel.findOne({ email: normalized }).lean();
     return doc ? { ...doc, id: doc._id.toString() } : null;
   }
-  const users = await getUsers();
-  return users.find((u) => norm(u.email) === norm(email));
+  if (IS_VERCEL) return null;
+  const users = readLocalJson(USERS_FILE);
+  return users.find((u) => (u.email || '').toLowerCase().trim() === normalized) || null;
 }
 
 async function saveUser(userObj) {
-  if (IS_VERCEL && !MONGODB_URI) {
-    throw new Error('Missing MONGODB_URI for production user persistence');
-  }
-  if (isMongoConnected) {
-    await UserModel.updateOne(
-      { email: userObj.email.toLowerCase().trim() },
-      { $set: userObj },
-      { upsert: true }
-    );
+  const email = (userObj.email || '').toLowerCase().trim();
+  const record = {
+    email,
+    passwordHash: userObj.passwordHash,
+    verified: userObj.verified !== false,
+    createdAt: userObj.createdAt || new Date().toISOString(),
+  };
+  if (useMongoStorage()) {
+    await ensureMongoReady();
+    await UserModel.updateOne({ email }, { $set: record }, { upsert: true });
     return;
   }
   if (IS_VERCEL) {
-    throw new Error('Persistent user storage is not configured for this deployment');
+    const err = new Error('Missing MONGODB_URI for production user persistence');
+    err.code = 'MONGO_NOT_CONFIGURED';
+    throw err;
   }
-  const users = await getUsers();
-  const idx = users.findIndex((u) => (u.email || '').toLowerCase().trim() === userObj.email.toLowerCase().trim());
-  if (idx >= 0) users[idx] = userObj;
-  else users.push(userObj);
+  const users = readLocalJson(USERS_FILE);
+  const idx = users.findIndex((u) => (u.email || '').toLowerCase().trim() === email);
+  if (idx >= 0) users[idx] = { ...users[idx], ...record };
+  else users.push({ id: Date.now().toString(), ...record });
   fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
 }
 
-async function getFiles() {
-  if (IS_VERCEL && !MONGODB_URI) return [];
-  if (isMongoConnected) {
+async function getFilesForUser(userEmail) {
+  const normalized = (userEmail || '').toLowerCase().trim();
+  if (useMongoStorage()) {
+    await ensureMongoReady();
+    const docs = await FileModel.find({ email: normalized }).lean();
+    return docs.map((d) => ({ ...d, id: d.id || d._id.toString() }));
+  }
+  if (IS_VERCEL) return [];
+  const files = readLocalJson(FILES_FILE);
+  return files.filter((f) => (f.email || f.username || '').toLowerCase().trim() === normalized);
+}
+
+async function getAllFiles() {
+  if (useMongoStorage()) {
+    await ensureMongoReady();
     const docs = await FileModel.find({}).lean();
     return docs.map((d) => ({ ...d, id: d.id || d._id.toString() }));
   }
-  if (!fs.existsSync(FILES_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(FILES_FILE, 'utf8'));
-  } catch (_) {
-    return [];
+  if (IS_VERCEL) return [];
+  return readLocalJson(FILES_FILE);
+}
+
+async function findFileById(id) {
+  if (useMongoStorage()) {
+    await ensureMongoReady();
+    return FileModel.findOne({ id }).lean();
   }
+  if (IS_VERCEL) return null;
+  const files = readLocalJson(FILES_FILE);
+  return files.find((f) => f.id === id) || null;
 }
 
 async function saveFileEntry(entry) {
-  if (IS_VERCEL && !MONGODB_URI) {
-    throw new Error('Missing MONGODB_URI for production metadata persistence');
-  }
-  if (isMongoConnected) {
-    await FileModel.updateOne(
-      { id: entry.id },
-      { $set: entry },
-      { upsert: true }
-    );
+  if (useMongoStorage()) {
+    await ensureMongoReady();
+    await FileModel.updateOne({ id: entry.id }, { $set: entry }, { upsert: true });
     return;
   }
   if (IS_VERCEL) {
-    throw new Error('Persistent file metadata storage is not configured for this deployment');
+    const err = new Error('Missing MONGODB_URI for production metadata persistence');
+    err.code = 'MONGO_NOT_CONFIGURED';
+    throw err;
   }
-  const files = await getFiles();
+  const files = readLocalJson(FILES_FILE);
   files.push(entry);
   fs.writeFileSync(FILES_FILE, JSON.stringify(files, null, 2));
 }
 
 async function deleteFileEntry(id) {
-  if (isMongoConnected) {
+  if (useMongoStorage()) {
+    await ensureMongoReady();
     await FileModel.deleteOne({ id });
     return;
   }
-  const files = await getFiles();
+  if (IS_VERCEL) return;
+  const files = readLocalJson(FILES_FILE);
   const idx = files.findIndex((f) => f.id === id);
   if (idx >= 0) {
     files.splice(idx, 1);
@@ -269,32 +321,46 @@ async function deleteFileEntry(id) {
   }
 }
 
+function fileOwnerEmail(entry) {
+  return (entry && (entry.email || entry.username) || '').toLowerCase().trim();
+}
+
+function isFileExpired(entry) {
+  if (!entry || !entry.expiresAt) return false;
+  const expMs = new Date(entry.expiresAt).getTime();
+  return !isNaN(expMs) && expMs <= Date.now();
+}
+
+async function removeExpiredFile(entry) {
+  if (entry.blobUrl && delBlob && process.env.BLOB_READ_WRITE_TOKEN) {
+    try {
+      await delBlob(entry.blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+    } catch (_) { }
+  }
+  if (entry.storedName) {
+    const filePath = path.join(UPLOAD_DIR, entry.storedName);
+    if (fs.existsSync(filePath)) {
+      try { fs.unlinkSync(filePath); } catch (_) { }
+    }
+  }
+  await deleteFileEntry(entry.id);
+  audit('EXPIRED_AUTO_DELETED', entry.email || entry.username || 'system', `file: ${entry.originalName} id: ${entry.id}`);
+}
+
 async function cleanupExpiredFiles() {
   try {
-    const files = await getFiles();
+    const files = await getAllFiles();
     const now = Date.now();
     for (const f of files) {
       if (f && f.expiresAt) {
         const expMs = new Date(f.expiresAt).getTime();
         if (!isNaN(expMs) && expMs <= now) {
-          if (f.blobUrl && delBlob && process.env.BLOB_READ_WRITE_TOKEN) {
-            try {
-              await delBlob(f.blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
-            } catch (_) { }
-          }
-          if (f.storedName) {
-            const filePath = path.join(UPLOAD_DIR, f.storedName);
-            if (fs.existsSync(filePath)) {
-              try { fs.unlinkSync(filePath); } catch (_) { }
-            }
-          }
-          await deleteFileEntry(f.id);
-          audit('EXPIRED_AUTO_DELETED', f.email || f.username || 'system', `file: ${f.originalName} id: ${f.id}`);
+          await removeExpiredFile(f);
         }
       }
     }
   } catch (err) {
-    console.error('[Cleanup] Error cleaning expired files:', err);
+    console.error('[Cleanup] Error cleaning expired files:', sanitizeErrorMessage(err.message));
   }
 }
 
@@ -304,26 +370,56 @@ setInterval(cleanupExpiredFiles, 60000);
 
 function authMiddleware(req, res, next) {
   const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7).trim();
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      if (decoded && decoded.email) {
-        req.user = { email: String(decoded.email).trim().toLowerCase() };
-        return next();
-      }
-    } catch (_) { }
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Unauthorized. Please log in.' });
+  }
+  const token = authHeader.substring(7).trim();
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (decoded && decoded.email) {
+      req.user = { email: String(decoded.email).trim().toLowerCase() };
+      return next();
+    }
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Session expired. Please log in again.' });
+    }
+    return res.status(401).json({ error: 'Invalid session. Please log in again.' });
   }
   return res.status(401).json({ error: 'Unauthorized. Please log in.' });
 }
 
-app.get('/api/health', (req, res) => {
+function getAuthEmailFromRequest(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7).trim();
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    if (decoded && decoded.email) {
+      return String(decoded.email).trim().toLowerCase();
+    }
+  } catch (_) { }
+  return null;
+}
+
+app.get('/api/health', async (req, res) => {
   const base = getPublicBaseUrl(req);
+  let mongoReady = false;
+  if (MONGODB_URI) {
+    try {
+      mongoReady = await ensureMongoReady();
+    } catch (_) { }
+  }
   res.json({
     ok: true,
     message: 'SecureCloud API',
-    mongoActive: isMongoConnected,
+    mongoConfigured: !!MONGODB_URI,
+    mongoActive: mongoReady,
+    mongoDatabase: mongoReady ? mongoose.connection.name : null,
+    blobConfigured: !!process.env.BLOB_READ_WRITE_TOKEN,
     blobActive: !!(putBlob && process.env.BLOB_READ_WRITE_TOKEN),
+    jwtConfigured: !!process.env.JWT_SECRET,
+    isVercel: IS_VERCEL,
     baseUrl: base,
     routes: ['/api/login', '/api/register', '/api/me', '/api/files'],
   });
@@ -332,30 +428,37 @@ app.get('/api/health', (req, res) => {
 // POST /api/login
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body || {};
-  if (!email || !password) {
+  const normalizedEmail = (email || '').trim().toLowerCase();
+  if (!normalizedEmail || !password) {
     return res.status(400).json({ error: 'Email and password required' });
   }
   if (IS_VERCEL && !MONGODB_URI) {
-    audit('LOGIN_FAIL', String(email).trim(), 'MONGODB_URI missing in production');
+    audit('LOGIN_FAIL', normalizedEmail, 'MONGODB_URI missing in production');
     return res.status(503).json({ error: 'Authentication storage is not configured. Missing MONGODB_URI.' });
   }
-  const user = await findUserByEmail(email.trim());
-  if (!user || !bcrypt.compareSync(password, user.passwordHash)) {
-    audit('LOGIN_FAIL', email && email.trim(), 'invalid credentials');
-    return res.status(401).json({ error: 'Invalid credentials' });
+  try {
+    const user = await findUserByEmail(normalizedEmail);
+    if (!user || !user.passwordHash) {
+      audit('LOGIN_FAIL', normalizedEmail, 'user not found');
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    if (!bcrypt.compareSync(password, user.passwordHash)) {
+      audit('LOGIN_FAIL', normalizedEmail, 'invalid password');
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    if (user.verified === false) {
+      audit('LOGIN_FAIL', user.email, 'email not verified');
+      return res.status(403).json({ error: 'Please verify your email first. Check your inbox for the verification link.' });
+    }
+    const userEmail = (user.email || normalizedEmail).trim().toLowerCase();
+    const token = jwt.sign({ email: userEmail }, JWT_SECRET, { expiresIn: '7d' });
+    audit('LOGIN_OK', userEmail, '');
+    res.json({ token, email: userEmail });
+  } catch (err) {
+    const mongoErr = mongoErrorResponse(err);
+    audit('LOGIN_FAIL', normalizedEmail, 'database unavailable');
+    return res.status(mongoErr.status).json({ error: mongoErr.error });
   }
-  if (user.verified === false) {
-    audit('LOGIN_FAIL', user.email, 'email not verified');
-    return res.status(403).json({ error: 'Please verify your email first. Check your inbox for the verification link.' });
-  }
-  const userEmail = (user.email || '').trim();
-  const token = jwt.sign(
-    { email: userEmail },
-    JWT_SECRET,
-    { expiresIn: '7d' }
-  );
-  audit('LOGIN_OK', userEmail, '');
-  res.json({ token, email: userEmail });
 });
 
 // POST /api/register
@@ -365,8 +468,8 @@ app.post('/api/register', async (req, res) => {
   if (!trimmed || !password) {
     return res.status(400).json({ error: 'Email and password required' });
   }
-  if (password.length < 4) {
-    return res.status(400).json({ error: 'Password must be at least 4 characters' });
+  if (password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
     return res.status(400).json({ error: 'Invalid email format' });
@@ -375,26 +478,36 @@ app.post('/api/register', async (req, res) => {
     audit('REGISTER_FAIL', trimmed, 'MONGODB_URI missing in production');
     return res.status(503).json({ error: 'User database is not configured. Missing MONGODB_URI.' });
   }
-  const existingUser = await findUserByEmail(trimmed);
-  if (existingUser) {
-    return res.status(409).json({ error: 'An account with this email already exists' });
-  }
-
-  const newUser = {
-    id: Date.now().toString(),
-    email: trimmed,
-    passwordHash: bcrypt.hashSync(password, 10),
-    verified: true,
-    createdAt: new Date().toISOString(),
-  };
   try {
-    await saveUser(newUser);
+    const existingUser = await findUserByEmail(trimmed);
+    if (existingUser) {
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    }
+
+    const passwordHash = bcrypt.hashSync(password, 10);
+    await saveUser({
+      email: trimmed,
+      passwordHash,
+      verified: true,
+      createdAt: new Date().toISOString(),
+    });
+
+    const savedUser = await findUserByEmail(trimmed);
+    if (!savedUser || !savedUser.passwordHash || !bcrypt.compareSync(password, savedUser.passwordHash)) {
+      console.error('[Register] Verification failed: user not readable after save');
+      return res.status(503).json({ error: 'Account could not be persisted. Please try again.' });
+    }
+
+    audit('REGISTER', trimmed, 'account created');
+    res.status(201).json({ email: trimmed, message: 'Account created successfully. You can now log in.' });
   } catch (err) {
-    console.error('[Register] Save failed:', err.message);
-    return res.status(503).json({ error: err.message || 'User database is not configured.' });
+    if (err && err.code === 11000) {
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    }
+    const mongoErr = mongoErrorResponse(err);
+    console.error('[Register] Save failed:', sanitizeErrorMessage(err.message));
+    return res.status(mongoErr.status).json({ error: mongoErr.error });
   }
-  audit('REGISTER', trimmed, 'account created');
-  res.status(201).json({ email: trimmed, message: 'Account created successfully. You can now log in.' });
 });
 
 // GET /api/me — require auth
@@ -411,7 +524,18 @@ app.post('/api/logout', authMiddleware, (req, res) => {
 // ---------- FILES (auth required) ----------
 
 // POST /api/files — upload encrypted payload
-app.post('/api/files', authMiddleware, upload.single('file'), async (req, res) => {
+app.post('/api/files', authMiddleware, (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'File too large. Maximum upload size is 4 MB.' });
+      }
+      console.error('[Upload Diagnostic] Multipart parse error:', sanitizeErrorMessage(err.message));
+      return res.status(400).json({ error: 'Invalid file upload. Could not parse multipart request.' });
+    }
+    next();
+  });
+}, async (req, res) => {
   console.log(`[Upload Diagnostic] Method: ${req.method} | Content-Type: ${req.headers['content-type'] || 'none'}`);
   console.log(`[Upload Diagnostic] User: ${req.user ? req.user.email : 'unauthenticated'} | File Attached: ${!!req.file}`);
   
@@ -458,14 +582,15 @@ app.post('/api/files', authMiddleware, upload.single('file'), async (req, res) =
       const blob = await putBlob(`uploads/${fileId}`, req.file.buffer, {
         access: 'public',
         addRandomSuffix: false,
+        contentType: encrypted ? 'application/octet-stream' : (req.file.mimetype || 'application/octet-stream'),
         token: blobToken,
       });
       blobUrl = blob.url;
-      console.log(`[Upload Diagnostic] Vercel Blob upload SUCCESS.`);
+      console.log('[Upload Diagnostic] Vercel Blob upload SUCCESS.');
     } catch (blobErr) {
       const safeErr = sanitizeErrorMessage(blobErr.message || String(blobErr));
       console.error('[Upload Diagnostic] Vercel Blob upload EXCEPTION:', safeErr);
-      return res.status(500).json({ error: `Cloud storage upload failed: ${safeErr}` });
+      return res.status(500).json({ error: `Blob upload failed: ${safeErr}` });
     }
   } else if (IS_VERCEL) {
     console.error('[Upload Diagnostic] BLOB_READ_WRITE_TOKEN missing in Vercel runtime environment');
@@ -493,14 +618,14 @@ app.post('/api/files', authMiddleware, upload.single('file'), async (req, res) =
   try {
     await saveFileEntry(entry);
   } catch (err) {
-    console.error('[Upload] Metadata save failed:', err);
+    console.error('[Upload] Metadata save failed:', sanitizeErrorMessage(err.message));
     if (blobUrl && delBlob && process.env.BLOB_READ_WRITE_TOKEN) {
       try {
         await delBlob(blobUrl, { token: String(process.env.BLOB_READ_WRITE_TOKEN).trim() });
       } catch (_) {}
     }
-    const safeDbErr = sanitizeErrorMessage(err.message || String(err));
-    return res.status(500).json({ error: `Failed to save file metadata: ${safeDbErr}` });
+    const mongoErr = mongoErrorResponse(err);
+    return res.status(mongoErr.status).json({ error: `Failed to save file metadata: ${mongoErr.error}` });
   }
   audit('UPLOAD', req.user.email, `file: ${entry.originalName} id: ${entry.id} expiresAt: ${expiresAt || 'never'}`);
   res.status(201).json(entry);
@@ -508,88 +633,99 @@ app.post('/api/files', authMiddleware, upload.single('file'), async (req, res) =
 
 // GET /api/files — list current user's files
 app.get('/api/files', authMiddleware, async (req, res) => {
-  await cleanupExpiredFiles();
-  const userEmail = req.user.email;
-  const allFiles = await getFiles();
-  const files = allFiles.filter((f) => (f.email || f.username) === userEmail);
-  res.json(files);
+  try {
+    await cleanupExpiredFiles();
+    const files = await getFilesForUser(req.user.email);
+    const safeFiles = files.map(({ blobUrl, ...rest }) => rest);
+    res.json(safeFiles);
+  } catch (err) {
+    const mongoErr = mongoErrorResponse(err);
+    return res.status(mongoErr.status).json({ error: mongoErr.error });
+  }
 });
 
 // GET /api/files/:id — download payload
 app.get('/api/files/:id', async (req, res) => {
-  await cleanupExpiredFiles();
-  const files = await getFiles();
-  const isShareDownload = req.query && req.query.isShareDownload === 'true';
+  try {
+    const isShareDownload = req.query && req.query.isShareDownload === 'true';
+    const reqUserEmail = getAuthEmailFromRequest(req);
 
-  let reqUserEmail = null;
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7).trim();
-    try {
-      const decoded = jwt.verify(token, JWT_SECRET);
-      if (decoded && decoded.email) {
-        reqUserEmail = String(decoded.email).trim().toLowerCase();
-      }
-    } catch (_) { }
-  }
+    const entry = await findFileById(req.params.id);
+    if (!entry) return res.status(404).json({ error: 'File not found' });
 
-  const entry = files.find((f) => f.id === req.params.id && (isShareDownload || (reqUserEmail && (f.email || f.username) === reqUserEmail)));
-  if (!entry) return res.status(404).json({ error: 'File not found' });
-
-  if (entry.expiresAt) {
-    const expMs = new Date(entry.expiresAt).getTime();
-    if (!isNaN(expMs) && expMs <= Date.now()) {
+    if (isFileExpired(entry)) {
+      await removeExpiredFile(entry);
       audit('DOWNLOAD_BLOCKED_EXPIRED', reqUserEmail || 'unauthenticated_share', `file: ${entry.originalName} id: ${entry.id}`);
       return res.status(410).json({ error: 'This file has expired.' });
     }
-  }
 
-  const auditAction = isShareDownload ? 'SHARE_DOWNLOAD' : 'DOWNLOAD';
-
-  if (entry.blobUrl) {
-    try {
-      const blobRes = await fetch(entry.blobUrl);
-      if (!blobRes.ok) return res.status(404).json({ error: 'Cloud blob file not found' });
-      const arrayBuf = await blobRes.arrayBuffer();
-      const buf = Buffer.from(arrayBuf);
-      audit(auditAction, reqUserEmail || 'unauthenticated_share', `file: ${entry.originalName} id: ${entry.id}`);
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(entry.originalName)}"`);
-      return res.send(buf);
-    } catch (err) {
-      console.error('[BlobDownload] Error fetching blob:', err.message);
-      return res.status(500).json({ error: 'Failed to download cloud file' });
+    if (!isShareDownload) {
+      if (!reqUserEmail) {
+        return res.status(401).json({ error: 'Unauthorized. Please log in.' });
+      }
+      if (fileOwnerEmail(entry) !== reqUserEmail) {
+        audit('DOWNLOAD_DENIED', reqUserEmail, `file: ${entry.originalName} id: ${entry.id}`);
+        return res.status(403).json({ error: 'You do not have access to this file.' });
+      }
     }
-  }
 
-  const filePath = path.join(UPLOAD_DIR, entry.storedName);
-  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
-  audit(auditAction, reqUserEmail || 'unauthenticated_share', `file: ${entry.originalName} id: ${entry.id}`);
-  res.download(filePath, entry.originalName);
+    const auditAction = isShareDownload ? 'SHARE_DOWNLOAD' : 'DOWNLOAD';
+
+    if (entry.blobUrl) {
+      try {
+        const blobRes = await fetch(entry.blobUrl);
+        if (!blobRes.ok) return res.status(404).json({ error: 'Cloud blob file not found' });
+        const arrayBuf = await blobRes.arrayBuffer();
+        const buf = Buffer.from(arrayBuf);
+        audit(auditAction, reqUserEmail || 'unauthenticated_share', `file: ${entry.originalName} id: ${entry.id}`);
+        res.setHeader('Content-Type', 'application/octet-stream');
+        res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(entry.originalName)}"`);
+        return res.send(buf);
+      } catch (err) {
+        console.error('[BlobDownload] Error fetching blob:', sanitizeErrorMessage(err.message));
+        return res.status(500).json({ error: 'Failed to download cloud file' });
+      }
+    }
+
+    const filePath = path.join(UPLOAD_DIR, entry.storedName);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+    audit(auditAction, reqUserEmail || 'unauthenticated_share', `file: ${entry.originalName} id: ${entry.id}`);
+    res.download(filePath, entry.originalName);
+  } catch (err) {
+    const mongoErr = mongoErrorResponse(err);
+    return res.status(mongoErr.status).json({ error: mongoErr.error });
+  }
 });
 
 // DELETE /api/files/:id
 app.delete('/api/files/:id', authMiddleware, async (req, res) => {
-  const files = await getFiles();
-  const idx = files.findIndex((f) => f.id === req.params.id && (f.email || f.username) === req.user.email);
-  if (idx === -1) return res.status(404).json({ error: 'File not found' });
-  const entry = files[idx];
-
-  if (entry.blobUrl && delBlob && process.env.BLOB_READ_WRITE_TOKEN) {
-    try {
-      await delBlob(entry.blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
-    } catch (_) { }
-  }
-  if (entry.storedName) {
-    const filePath = path.join(UPLOAD_DIR, entry.storedName);
-    if (fs.existsSync(filePath)) {
-      try { fs.unlinkSync(filePath); } catch (_) { }
+  try {
+    const entry = await findFileById(req.params.id);
+    if (!entry) return res.status(404).json({ error: 'File not found' });
+    if (fileOwnerEmail(entry) !== req.user.email) {
+      audit('DELETE_DENIED', req.user.email, `file: ${entry.originalName} id: ${entry.id}`);
+      return res.status(403).json({ error: 'You do not have access to this file.' });
     }
-  }
 
-  await deleteFileEntry(entry.id);
-  audit('DELETE', req.user.email, `file: ${entry.originalName} id: ${entry.id}`);
-  res.json({ ok: true });
+    if (entry.blobUrl && delBlob && process.env.BLOB_READ_WRITE_TOKEN) {
+      try {
+        await delBlob(entry.blobUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      } catch (_) { }
+    }
+    if (entry.storedName) {
+      const filePath = path.join(UPLOAD_DIR, entry.storedName);
+      if (fs.existsSync(filePath)) {
+        try { fs.unlinkSync(filePath); } catch (_) { }
+      }
+    }
+
+    await deleteFileEntry(entry.id);
+    audit('DELETE', req.user.email, `file: ${entry.originalName} id: ${entry.id}`);
+    res.json({ ok: true });
+  } catch (err) {
+    const mongoErr = mongoErrorResponse(err);
+    return res.status(mongoErr.status).json({ error: mongoErr.error });
+  }
 });
 
 // Serve frontend static files — AFTER API routes so /api/* is handled first
