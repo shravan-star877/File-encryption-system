@@ -1129,19 +1129,14 @@ body {
         touch-action: none !important;
     }
 
-    body.modal-open .header,
-    body.modal-open .main-container,
-    body.modal-open .scanline {
+    body.modal-open:has(#loginOverlay[style*="flex"]) .header,
+    body.modal-open:has(#loginOverlay[style*="flex"]) .main-container,
+    body.modal-open:has(#loginOverlay[style*="flex"]) .scanline {
         visibility: hidden !important;
         pointer-events: none !important;
     }
 
-    body.modal-open .login-overlay {
-        visibility: visible !important;
-        pointer-events: auto !important;
-    }
-
-    body.modal-open .modal-overlay {
+    body.modal-open:has(#loginOverlay[style*="flex"]) .login-overlay {
         visibility: visible !important;
         pointer-events: auto !important;
     }
