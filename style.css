@@ -1121,12 +1121,24 @@ body {
     html.modal-open,
     body.modal-open {
         overflow: hidden !important;
+    }
+
+    html.modal-open:has(#loginOverlay[style*="flex"]),
+    body.modal-open:has(#loginOverlay[style*="flex"]) {
         position: fixed !important;
         width: 100% !important;
         height: 100% !important;
         max-height: 100dvh !important;
         overscroll-behavior: none !important;
         touch-action: none !important;
+    }
+
+    body.modal-open .modal-overlay {
+        z-index: 100000 !important;
+    }
+
+    body.modal-open .scanline {
+        visibility: hidden !important;
     }
 
     body.modal-open:has(#loginOverlay[style*="flex"]) .header,
