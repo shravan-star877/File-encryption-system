@@ -1141,6 +1141,11 @@ body {
         pointer-events: auto !important;
     }
 
+    body.modal-open .modal-overlay {
+        visibility: visible !important;
+        pointer-events: auto !important;
+    }
+
     .main-container {
         padding: 1rem;
     }
